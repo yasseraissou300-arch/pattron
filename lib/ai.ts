@@ -1,14 +1,9 @@
-// Wrapper Claude Vision pour l'analyse de vêtements
-// Utilise claude-sonnet-4-6 avec prompt caching pour optimiser les coûts
+// Wrapper Google Gemini Vision pour l'analyse de vêtements
+// Utilise gemini-2.5-flash (tier gratuit généreux, ~1500 req/jour)
 
-import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-})
-
-// Schéma de validation zod pour la réponse de Claude
+// Schéma de validation zod pour la réponse de l'IA
 export const GarmentAnalysisSchema = z.object({
   type: z.enum(["tshirt", "dress", "skirt", "pants", "shirt"]),
   neckline: z.string().min(1),
@@ -54,46 +49,100 @@ Règles d'évaluation :
 
 type MediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp"
 
+// Schéma structuré demandé à Gemini (JSON mode)
+const RESPONSE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    type: {
+      type: "STRING",
+      enum: ["tshirt", "dress", "skirt", "pants", "shirt"],
+    },
+    neckline: { type: "STRING" },
+    sleeves: { type: "STRING" },
+    fit: { type: "STRING" },
+    length: { type: "STRING" },
+    details: { type: "ARRAY", items: { type: "STRING" } },
+    difficulty: { type: "INTEGER" },
+    confidence: { type: "NUMBER" },
+  },
+  required: [
+    "type",
+    "neckline",
+    "sleeves",
+    "fit",
+    "length",
+    "details",
+    "difficulty",
+    "confidence",
+  ],
+}
+
+const GEMINI_MODEL = "gemini-2.5-flash"
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
+
 export async function analyzeGarmentImage(
   imageBase64: string,
   mediaType: MediaType = "image/jpeg"
 ): Promise<GarmentAnalysis> {
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 512,
-    system: [
-      {
-        type: "text",
-        text: SYSTEM_PROMPT,
-        // Cache le prompt système pour réduire les coûts (TTL 5 min)
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    messages: [
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY n'est pas configurée")
+  }
+
+  const body = {
+    system_instruction: {
+      parts: [{ text: SYSTEM_PROMPT }],
+    },
+    contents: [
       {
         role: "user",
-        content: [
+        parts: [
           {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mediaType,
+            inline_data: {
+              mime_type: mediaType,
               data: imageBase64,
             },
           },
           {
-            type: "text",
             text: "Analyse ce vêtement et retourne l'objet JSON comme demandé.",
           },
         ],
       },
     ],
+    generationConfig: {
+      response_mime_type: "application/json",
+      response_schema: RESPONSE_SCHEMA,
+      temperature: 0.2,
+      maxOutputTokens: 512,
+    },
+  }
+
+  const res = await fetch(GEMINI_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify(body),
   })
 
-  const rawText =
-    response.content[0].type === "text" ? response.content[0].text.trim() : ""
+  if (!res.ok) {
+    const errTxt = await res.text().catch(() => "")
+    throw new Error(`Gemini API ${res.status}: ${errTxt.slice(0, 300)}`)
+  }
 
-  // Extraction robuste du JSON (au cas où Claude ajouterait du texte)
+  const data = (await res.json()) as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> }
+    }>
+  }
+
+  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ""
+  if (!rawText) {
+    throw new Error("L'IA n'a pas retourné de texte")
+  }
+
+  // Extraction robuste du JSON
   const jsonMatch = rawText.match(/\{[\s\S]*\}/)
   if (!jsonMatch) {
     throw new Error("L'IA n'a pas retourné un JSON valide")
