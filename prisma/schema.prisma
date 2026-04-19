@@ -1,0 +1,35 @@
+// Schéma Prisma pour PatronAI
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  clerkId      String    @unique
+  email        String    @unique
+  plan         String    @default("GRATUIT")
+  patronsCount Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  patrons      Pattern[]
+}
+
+model Pattern {
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id])
+  garmentType  String
+  analysisData String
+  measurements String
+  svgData      String
+  shareToken   String   @unique @default(cuid())
+  isPublic     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+}
