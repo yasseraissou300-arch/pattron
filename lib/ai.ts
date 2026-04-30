@@ -122,19 +122,39 @@ export async function analyzeGarmentImage(
     },
   }
 
-  const res = await fetch(GEMINI_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
-    },
-    body: JSON.stringify(body),
-  })
+  // Retry sur 5xx / 429 (modèle saturé chez Google) avec backoff exponentiel.
+  // Les 4xx restants sont des erreurs déterministes (auth, payload) → pas de retry.
+  const RETRY_DELAYS_MS = [800, 2400, 6000]
+  let lastErr: { status: number; body: string } | null = null
 
-  if (!res.ok) {
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    const res = await fetch(GEMINI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (res.ok) {
+      return await parseGeminiResponse(res)
+    }
+
     const errTxt = await res.text().catch(() => "")
-    throw new Error(`Gemini API ${res.status}: ${errTxt.slice(0, 300)}`)
+    lastErr = { status: res.status, body: errTxt.slice(0, 300) }
+
+    const retriable = res.status === 503 || res.status === 502 || res.status === 500 || res.status === 429
+    const hasMoreAttempts = attempt < RETRY_DELAYS_MS.length
+    if (!retriable || !hasMoreAttempts) break
+
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
   }
+
+  throw new Error(`Gemini API ${lastErr?.status}: ${lastErr?.body}`)
+}
+
+async function parseGeminiResponse(res: Response): Promise<GarmentAnalysis> {
 
   const data = (await res.json()) as {
     candidates?: Array<{

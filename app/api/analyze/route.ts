@@ -62,6 +62,15 @@ export async function POST(request: NextRequest) {
         { status: 429 }
       )
     }
+    if (message.includes("503") || message.includes("UNAVAILABLE") || message.includes("502")) {
+      return NextResponse.json(
+        {
+          error:
+            "Le service d'IA est saturé en ce moment. On a déjà retenté plusieurs fois. Réessaie dans 1-2 minutes.",
+        },
+        { status: 503 }
+      )
+    }
 
     console.error("[/api/analyze]", error)
     return NextResponse.json(
