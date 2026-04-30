@@ -113,7 +113,12 @@ export async function analyzeGarmentImage(
       response_mime_type: "application/json",
       response_schema: RESPONSE_SCHEMA,
       temperature: 0.2,
-      maxOutputTokens: 512,
+      // gemini-2.5-flash est un modèle "thinking" : sans plafond explicite,
+      // le raisonnement consomme tout le budget et la réponse JSON arrive
+      // tronquée. On désactive le thinking pour cette tâche simple de
+      // classification, et on garde une marge confortable de tokens.
+      thinkingConfig: { thinkingBudget: 0 },
+      maxOutputTokens: 1024,
     },
   }
 
@@ -134,18 +139,30 @@ export async function analyzeGarmentImage(
   const data = (await res.json()) as {
     candidates?: Array<{
       content?: { parts?: Array<{ text?: string }> }
+      finishReason?: string
     }>
   }
 
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ""
+  const candidate = data.candidates?.[0]
+  // Gemini peut renvoyer plusieurs parts (texte fragmenté, thoughts ignorées
+  // côté serveur quand thinkingBudget=0). On concatène tout le texte.
+  const rawText = (candidate?.content?.parts ?? [])
+    .map((p) => p.text ?? "")
+    .join("")
+    .trim()
+
   if (!rawText) {
-    throw new Error("L'IA n'a pas retourné de texte")
+    throw new Error(
+      `L'IA n'a pas retourné de texte (finishReason=${candidate?.finishReason ?? "?"})`,
+    )
   }
 
   // Extraction robuste du JSON
   const jsonMatch = rawText.match(/\{[\s\S]*\}/)
   if (!jsonMatch) {
-    throw new Error("L'IA n'a pas retourné un JSON valide")
+    throw new Error(
+      `L'IA n'a pas retourné un JSON valide (finishReason=${candidate?.finishReason ?? "?"}, début="${rawText.slice(0, 80)}")`,
+    )
   }
 
   const parsed = JSON.parse(jsonMatch[0])
