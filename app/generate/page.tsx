@@ -10,6 +10,7 @@ import { UploadZone } from "@/components/UploadZone"
 import { AnalysisPanel } from "@/components/AnalysisPanel"
 import { SizeSelector } from "@/components/SizeSelector"
 import { PatternViewer } from "@/components/PatternViewer"
+import { Mannequin3D } from "@/components/Mannequin3D"
 import { SewingGuide } from "@/components/SewingGuide"
 import { DownloadActions } from "@/components/DownloadActions"
 import type { GarmentAnalysis } from "@/lib/ai"
@@ -17,15 +18,16 @@ import type { EuSize, SizeMeasurements, PatternResult } from "@/lib/types/patter
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Step = 1 | 2 | 3 | 4 | 5 | 6
+type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7
 
 const STEP_LABELS: Record<Step, string> = {
   1: "Photo",
   2: "Analyse",
   3: "Tailles",
   4: "Patron",
-  5: "Guide",
-  6: "Téléchargement",
+  5: "Aperçu 3D",
+  6: "Guide",
+  7: "Téléchargement",
 }
 
 // ─── Stepper ──────────────────────────────────────────────────────────────────
@@ -33,7 +35,7 @@ const STEP_LABELS: Record<Step, string> = {
 function Stepper({ current }: { current: Step }) {
   return (
     <div className="flex items-center justify-center gap-0 overflow-x-auto pb-2">
-      {([1, 2, 3, 4, 5, 6] as Step[]).map((step, i) => (
+      {([1, 2, 3, 4, 5, 6, 7] as Step[]).map((step, i) => (
         <div key={step} className="flex items-center">
           <div className="flex flex-col items-center gap-1">
             <div
@@ -57,7 +59,7 @@ function Stepper({ current }: { current: Step }) {
               {STEP_LABELS[step]}
             </span>
           </div>
-          {i < 5 && (
+          {i < 6 && (
             <div
               className={cn(
                 "w-8 sm:w-12 h-0.5 mx-1 mb-4 sm:mb-5",
@@ -137,7 +139,11 @@ export default function GeneratePage() {
         body: JSON.stringify({ image: imageBase64, mediaType }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Erreur d'analyse")
+      if (!res.ok) {
+        const detail =
+          data.debug?.message ? ` — ${data.debug.message}` : ""
+        throw new Error((data.error ?? "Erreur d'analyse") + detail)
+      }
       setAnalysis(data)
       setStep(2)
     } catch (err) {
@@ -186,6 +192,39 @@ export default function GeneratePage() {
         err instanceof Error
           ? err.message
           : "Impossible de générer le patron. Vérifie tes mesures et réessaie."
+      )
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // Régénération du patron depuis l'étape 5 (Mannequin 3D) avec mesures ajustées.
+  // Bascule en mode "Personnalisé" pour conserver les nouvelles valeurs jusqu'au PDF.
+  const handleAdjustAndRegenerate = async (adjusted: SizeMeasurements) => {
+    setIsGenerating(true)
+    setGenerateError(null)
+
+    try {
+      const res = await fetch("/api/pattern", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          garmentType: "tshirt",
+          measurements: adjusted,
+          options: { seamAllowance: 1 },
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Erreur de génération")
+
+      setPatternBySize({ Personnalisé: data })
+      setUseCustom(true)
+      setCustomMeasurements(adjusted)
+    } catch (err) {
+      setGenerateError(
+        err instanceof Error
+          ? err.message
+          : "Impossible de régénérer le patron. Réessaie dans quelques secondes."
       )
     } finally {
       setIsGenerating(false)
@@ -253,16 +292,18 @@ export default function GeneratePage() {
             {step === 2 && "Ce que l'IA a détecté"}
             {step === 3 && "Choix de la taille"}
             {step === 4 && "Ton patron de couture"}
-            {step === 5 && "Guide de couture pas-à-pas"}
-            {step === 6 && "Télécharge ton patron"}
+            {step === 5 && "Aperçu 3D & ajustements"}
+            {step === 6 && "Guide de couture pas-à-pas"}
+            {step === 7 && "Télécharge ton patron"}
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            {step === 1 && "Étape 1 sur 6 · Uploade une photo de ton vêtement à plat"}
-            {step === 2 && "Étape 2 sur 6 · Vérifie les informations détectées"}
-            {step === 3 && "Étape 3 sur 6 · Sélectionne ta taille ou saisis tes mesures"}
-            {step === 4 && "Étape 4 sur 6 · Voici les pièces de ton patron"}
-            {step === 5 && "Étape 5 sur 6 · Suis ces étapes pour assembler ton t-shirt"}
-            {step === 6 && "Étape 6 sur 6 · Télécharge les fichiers prêts à imprimer"}
+            {step === 1 && "Étape 1 sur 7 · Uploade une photo de ton vêtement à plat"}
+            {step === 2 && "Étape 2 sur 7 · Vérifie les informations détectées"}
+            {step === 3 && "Étape 3 sur 7 · Sélectionne ta taille ou saisis tes mesures"}
+            {step === 4 && "Étape 4 sur 7 · Voici les pièces de ton patron"}
+            {step === 5 && "Étape 5 sur 7 · Visualise le rendu et ajuste les mensurations"}
+            {step === 6 && "Étape 6 sur 7 · Suis ces étapes pour assembler ton t-shirt"}
+            {step === 7 && "Étape 7 sur 7 · Télécharge les fichiers prêts à imprimer"}
           </p>
         </div>
 
@@ -366,15 +407,32 @@ export default function GeneratePage() {
                     onClick={() => setStep(5)}
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
                   >
-                    Voir le guide de couture
+                    Voir l&apos;aperçu 3D
                   </button>
                 </div>
               </StepPanel>
             )}
 
-            {/* ── Étape 5 : Guide de couture ── */}
-            {step === 5 && Object.keys(patternBySize).length > 0 && (
+            {/* ── Étape 5 : Mannequin 3D ── */}
+            {step === 5 && (
               <StepPanel stepKey={5}>
+                <Mannequin3D
+                  initialMeasurements={activeMeasurements}
+                  onRegenerate={handleAdjustAndRegenerate}
+                  onContinue={() => setStep(6)}
+                  isRegenerating={isGenerating}
+                />
+                {generateError && (
+                  <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                    {generateError}
+                  </p>
+                )}
+              </StepPanel>
+            )}
+
+            {/* ── Étape 6 : Guide de couture ── */}
+            {step === 6 && Object.keys(patternBySize).length > 0 && (
+              <StepPanel stepKey={6}>
                 <div className="space-y-5">
                   <SewingGuide
                     result={
@@ -383,7 +441,7 @@ export default function GeneratePage() {
                     }
                   />
                   <button
-                    onClick={() => setStep(6)}
+                    onClick={() => setStep(7)}
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
                   >
                     Télécharger mon patron
@@ -392,9 +450,9 @@ export default function GeneratePage() {
               </StepPanel>
             )}
 
-            {/* ── Étape 6 : Téléchargement ── */}
-            {step === 6 && (
-              <StepPanel stepKey={6}>
+            {/* ── Étape 7 : Téléchargement ── */}
+            {step === 7 && (
+              <StepPanel stepKey={7}>
                 <DownloadActions
                   measurements={activeMeasurements}
                   sizeName={activeSizeName}
