@@ -68,6 +68,17 @@ export async function POST(request: NextRequest) {
       {
         error:
           "Une erreur est survenue lors de l'analyse. Réessaie avec une autre photo.",
+        // DEBUG TEMP: expose server error details to diagnose Vercel prod bug
+        debug: {
+          name: error instanceof Error ? error.name : typeof error,
+          message: error instanceof Error ? error.message : String(error),
+          stack:
+            error instanceof Error
+              ? error.stack?.split("\n").slice(0, 5).join(" | ")
+              : undefined,
+          hasKey: Boolean(process.env.ANTHROPIC_API_KEY),
+          keyLen: (process.env.ANTHROPIC_API_KEY ?? "").length,
+        },
       },
       { status: 500 }
     )

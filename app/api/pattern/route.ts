@@ -3,15 +3,15 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
-import { generatePattern } from "@/lib/patterns/tshirt"
+import { generatePattern, isValidGarmentType } from "@/lib/patterns/index"
 
 const MeasurementsSchema = z.object({
-  poitrine: z.number().min(60).max(160),
-  taille: z.number().min(50).max(140),
-  hanches: z.number().min(70).max(170),
-  epaule: z.number().min(30).max(55),
+  poitrine:       z.number().min(60).max(160),
+  taille:         z.number().min(50).max(140),
+  hanches:        z.number().min(70).max(170),
+  epaule:         z.number().min(30).max(55),
   longueurManche: z.number().min(5).max(70),
-  longueurDos: z.number().min(45).max(85),
+  longueurDos:    z.number().min(45).max(85),
 })
 
 const RequestSchema = z.object({
@@ -30,17 +30,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { garmentType, measurements, options } = RequestSchema.parse(body)
 
-    // Pour le MVP, seul le t-shirt est disponible
-    if (garmentType !== "tshirt") {
+    if (!isValidGarmentType(garmentType)) {
       return NextResponse.json(
-        {
-          error: `Le type "${garmentType}" n'est pas encore disponible. Seul le t-shirt femme est pris en charge pour le moment.`,
-        },
+        { error: `Type de vêtement non reconnu : "${garmentType}".` },
         { status: 422 }
       )
     }
 
-    const result = generatePattern(measurements, options.seamAllowance)
+    const result = generatePattern(garmentType, measurements, options.seamAllowance)
 
     return NextResponse.json(result)
   } catch (error) {
