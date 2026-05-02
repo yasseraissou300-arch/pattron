@@ -1,16 +1,22 @@
 "use client"
 
 // Scène 3D du mannequin paramétrique + drapé t-shirt issu d'un mesh triangulé
-// reconstruit à partir des pièces réelles du patron (Devant, Dos, Manches).
-// Le maillage est calculé via Delaunay puis projeté en 3D par projection
-// cylindrique sur le corps (cf. lib/3d/pattern-mesh.ts).
+// reconstruit à partir des pièces réelles du patron + simulation Verlet
+// (Phase 2B). Chaque pièce du patron a sa propre instance Cloth pilotée par
+// useFrame ; les positions sont écrites directement dans la BufferGeometry.
 
 import { useMemo, useRef, useEffect } from "react"
 import { Canvas, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
 import * as THREE from "three"
 import type { SizeMeasurements } from "@/lib/types/pattern"
-import { buildGarmentMesh, type PieceMesh } from "@/lib/3d/pattern-mesh"
+import {
+  buildGarmentMeshData,
+  makeAnatomy,
+  type PieceMeshData,
+} from "@/lib/3d/pattern-mesh"
+import { Cloth } from "@/lib/3d/cloth"
+import { buildClothForPiece } from "@/lib/3d/cloth-pieces"
 import { FABRICS, type FabricKey } from "@/lib/3d/fabrics"
 
 const CM_TO_M = 0.01
@@ -21,9 +27,10 @@ const circToRadius = (circCm: number): number => (circCm / (2 * Math.PI)) * CM_T
 interface MannequinProps {
   measurements: SizeMeasurements
   fabric: FabricKey
+  simEnabled: boolean
 }
 
-function Mannequin({ measurements, fabric }: MannequinProps) {
+function Mannequin({ measurements, fabric, simEnabled }: MannequinProps) {
   const groupRef = useRef<THREE.Group>(null)
 
   useFrame((_state, delta) => {
@@ -32,7 +39,7 @@ function Mannequin({ measurements, fabric }: MannequinProps) {
     }
   })
 
-  // Géométries du corps (lathe + primitives) — recalculées si les mesures changent.
+  // Géométries du corps — recalculées si les mesures changent.
   const body = useMemo(() => {
     const m = measurements
     const rChest = circToRadius(m.poitrine)
@@ -62,19 +69,63 @@ function Mannequin({ measurements, fabric }: MannequinProps) {
     }
   }, [measurements])
 
-  // Meshs triangulés du vêtement issus des pièces réelles du patron.
-  const garmentPieces = useMemo<PieceMesh[]>(
-    () => buildGarmentMesh(measurements),
-    [measurements],
-  )
+  // Meshs triangulés + simulation Verlet par pièce.
+  const sim = useMemo(() => {
+    const meshes = buildGarmentMeshData(measurements)
+    const anatomy = makeAnatomy(measurements)
+    const cloths = meshes.map((m) => buildClothForPiece(m, anatomy))
+    return { meshes, cloths, anatomy }
+  }, [measurements])
 
-  // Cleanup des géométries quand on en remplace (évite les fuites GPU).
-  useEffect(() => {
-    return () => {
-      garmentPieces.forEach((p) => p.geometry.dispose())
-      body.bodyGeometry.dispose()
+  // Boucle de simulation : à chaque frame, on avance Verlet et on synchronise
+  // les positions vers la BufferGeometry. Quand simEnabled=false, le mesh
+  // reste statique (rendu Phase 2A).
+  //
+  // La mutation directe de `posAttr.needsUpdate` et `geometry.computeVertexNormals`
+  // est le pattern documenté de r3f pour les géométries vivantes — on désactive
+  // localement la règle d'immutabilité strict-mode qui ne connaît pas ce pattern.
+  useFrame((_state, delta) => {
+    if (!simEnabled) return
+    const dt = Math.min(delta, 0.033)
+    const params = {
+      stiffness: FABRICS[fabric].stiffness,
+      damping: FABRICS[fabric].damping,
+      mass: FABRICS[fabric].mass,
+      // Gravité atténuée vs réelle (9.81) : un tissu fin avec stiffness modeste
+      // explose visuellement à 9.81. 4.5 donne un tombé plausible pour t-shirt.
+      gravity: 4.5,
+      iterations: 6,
     }
-  }, [garmentPieces, body.bodyGeometry])
+
+    const cloths = sim.cloths
+    const meshes = sim.meshes
+    for (let i = 0; i < cloths.length; i++) {
+      const cloth: Cloth = cloths[i]
+      cloth.step(dt, params)
+
+      const geo = meshes[i].geometry
+      const posAttr = geo.attributes.position as THREE.BufferAttribute
+      ;(posAttr.array as Float32Array).set(cloth.positions)
+      // eslint-disable-next-line react-hooks/immutability
+      posAttr.needsUpdate = true
+      geo.computeVertexNormals()
+    }
+  })
+
+  // Cleanup GPU lors du remplacement.
+  useEffect(() => {
+    const meshes = sim.meshes
+    return () => {
+      meshes.forEach((p: PieceMeshData) => p.geometry.dispose())
+    }
+  }, [sim.meshes])
+
+  useEffect(() => {
+    const geo = body.bodyGeometry
+    return () => {
+      geo.dispose()
+    }
+  }, [body.bodyGeometry])
 
   const fabricProps = FABRICS[fabric]
 
@@ -95,7 +146,6 @@ function Mannequin({ measurements, fabric }: MannequinProps) {
         <meshStandardMaterial color={SKIN_COLOR} roughness={0.7} metalness={0.05} />
       </mesh>
 
-      {/* Bras (peau) */}
       {([-1, 1] as const).map((side) => {
         const armLength = 0.55
         const cx = side * (body.shoulderWidthM / 2 + armLength / 2)
@@ -112,7 +162,6 @@ function Mannequin({ measurements, fabric }: MannequinProps) {
         )
       })}
 
-      {/* Jambes */}
       {([-1, 1] as const).map((side) => (
         <mesh
           key={`leg-${side}`}
@@ -124,8 +173,8 @@ function Mannequin({ measurements, fabric }: MannequinProps) {
         </mesh>
       ))}
 
-      {/* ── Vêtement : meshs triangulés depuis le patron 2D réel ── */}
-      {garmentPieces.map((piece) => (
+      {/* ── Vêtement : meshs triangulés + simulation ── */}
+      {sim.meshes.map((piece) => (
         <mesh key={piece.name} geometry={piece.geometry} castShadow>
           <meshStandardMaterial
             color={fabricProps.color}
@@ -143,9 +192,14 @@ function Mannequin({ measurements, fabric }: MannequinProps) {
 interface MannequinSceneProps {
   measurements: SizeMeasurements
   fabric: FabricKey
+  simEnabled?: boolean
 }
 
-export function MannequinScene({ measurements, fabric }: MannequinSceneProps) {
+export function MannequinScene({
+  measurements,
+  fabric,
+  simEnabled = true,
+}: MannequinSceneProps) {
   return (
     <div className="relative w-full aspect-square rounded-xl bg-gradient-to-b from-purple-50 to-gray-100 overflow-hidden border border-gray-200">
       <Canvas
@@ -163,7 +217,7 @@ export function MannequinScene({ measurements, fabric }: MannequinSceneProps) {
         />
         <directionalLight position={[-2, 1, -1]} intensity={0.35} />
 
-        <Mannequin measurements={measurements} fabric={fabric} />
+        <Mannequin measurements={measurements} fabric={fabric} simEnabled={simEnabled} />
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]} receiveShadow>
           <circleGeometry args={[1.2, 48]} />
