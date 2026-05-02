@@ -8,6 +8,7 @@ import dynamic from "next/dynamic"
 import { Loader2, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MORPH_PRESETS, MEASUREMENT_BOUNDS } from "@/lib/3d/presets"
+import { FABRICS, FABRIC_ORDER, type FabricKey } from "@/lib/3d/fabrics"
 import type { SizeMeasurements } from "@/lib/types/pattern"
 
 // Three.js + r3f ne s'exécutent qu'au client → dynamic import sans SSR.
@@ -50,6 +51,7 @@ export function Mannequin3D({
 }: Mannequin3DProps) {
   const [preview, setPreview] = useState<SizeMeasurements>(initialMeasurements)
   const [activePreset, setActivePreset] = useState<string | null>(null)
+  const [fabric, setFabric] = useState<FabricKey>("jersey")
   const [lastInitial, setLastInitial] = useState<SizeMeasurements>(initialMeasurements)
 
   // Reset preview lorsque les mesures source changent (passage entrant ou
@@ -86,7 +88,48 @@ export function Mannequin3D({
   return (
     <div className="space-y-6">
       {/* Visualisation 3D */}
-      <MannequinScene measurements={preview} />
+      <MannequinScene measurements={preview} fabric={fabric} />
+
+      {/* Sélecteur de tissu */}
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+          Tissu
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {FABRIC_ORDER.map((key) => {
+            const f = FABRICS[key]
+            const active = fabric === key
+            return (
+              <button
+                key={key}
+                onClick={() => setFabric(key)}
+                className={cn(
+                  "rounded-lg border p-3 text-left transition-colors",
+                  active
+                    ? "border-purple-600 bg-purple-50"
+                    : "border-gray-200 hover:border-purple-300",
+                )}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span
+                    className="inline-block w-4 h-4 rounded-full border border-gray-300"
+                    style={{ backgroundColor: f.color }}
+                  />
+                  <span
+                    className={cn(
+                      "text-sm font-medium",
+                      active ? "text-purple-700" : "text-gray-700",
+                    )}
+                  >
+                    {f.label}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-500 leading-snug">{f.description}</p>
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
       {/* Presets EU + DZ */}
       <div className="space-y-2">
