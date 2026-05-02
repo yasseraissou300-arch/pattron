@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { MORPH_PRESETS, MEASUREMENT_BOUNDS } from "@/lib/3d/presets"
 import { FABRICS, FABRIC_ORDER, type FabricKey } from "@/lib/3d/fabrics"
 import type { SizeMeasurements } from "@/lib/types/pattern"
+import type { GarmentType } from "@/lib/patterns/index"
 
 // Three.js + r3f ne s'exécutent qu'au client → dynamic import sans SSR.
 const MannequinScene = dynamic(
@@ -41,6 +42,7 @@ interface Mannequin3DProps {
   onRegenerate: (m: SizeMeasurements) => Promise<void> | void
   onContinue: () => void
   isRegenerating: boolean
+  garmentType: GarmentType
 }
 
 export function Mannequin3D({
@@ -48,10 +50,12 @@ export function Mannequin3D({
   onRegenerate,
   onContinue,
   isRegenerating,
+  garmentType,
 }: Mannequin3DProps) {
   const [preview, setPreview] = useState<SizeMeasurements>(initialMeasurements)
   const [activePreset, setActivePreset] = useState<string | null>(null)
   const [fabric, setFabric] = useState<FabricKey>("jersey")
+  const [simEnabled, setSimEnabled] = useState(true)
   const [lastInitial, setLastInitial] = useState<SizeMeasurements>(initialMeasurements)
 
   // Reset preview lorsque les mesures source changent (passage entrant ou
@@ -88,7 +92,33 @@ export function Mannequin3D({
   return (
     <div className="space-y-6">
       {/* Visualisation 3D */}
-      <MannequinScene measurements={preview} fabric={fabric} />
+      <MannequinScene
+        measurements={preview}
+        fabric={fabric}
+        simEnabled={simEnabled}
+        garmentType={garmentType}
+      />
+
+      {/* Toggle simulation */}
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-gray-500">
+          <span className="font-medium text-gray-700">Simulation tissu : </span>
+          {simEnabled
+            ? "le t-shirt tombe sous gravité (Verlet temps réel)"
+            : "rendu statique sans physique"}
+        </div>
+        <button
+          onClick={() => setSimEnabled((v) => !v)}
+          className={cn(
+            "px-3 py-1 text-xs font-medium rounded-full border transition-colors",
+            simEnabled
+              ? "bg-purple-600 border-purple-600 text-white"
+              : "border-gray-300 text-gray-600 hover:border-purple-300",
+          )}
+        >
+          {simEnabled ? "Active" : "Inactive"}
+        </button>
+      </div>
 
       {/* Sélecteur de tissu */}
       <div className="space-y-2">

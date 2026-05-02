@@ -175,7 +175,7 @@ export default function GeneratePage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            garmentType: "tshirt",
+            garmentType: analysis?.type ?? "tshirt",
             measurements,
             options: { seamAllowance: 1 },
           }),
@@ -209,7 +209,7 @@ export default function GeneratePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          garmentType: "tshirt",
+          garmentType: analysis?.type ?? "tshirt",
           measurements: adjusted,
           options: { seamAllowance: 1 },
         }),
@@ -404,23 +404,26 @@ export default function GeneratePage() {
                     useCustom={useCustom}
                   />
                   <button
-                    onClick={() => setStep(5)}
+                    onClick={() => setStep(analysis?.type === "pants" ? 6 : 5)}
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
                   >
-                    Voir l&apos;aperçu 3D
+                    {analysis?.type === "pants"
+                      ? "Voir le guide de couture"
+                      : "Voir l’aperçu 3D"}
                   </button>
                 </div>
               </StepPanel>
             )}
 
-            {/* ── Étape 5 : Mannequin 3D ── */}
-            {step === 5 && (
+            {/* ── Étape 5 : Mannequin 3D (sauté pour pants) ── */}
+            {step === 5 && analysis?.type !== "pants" && (
               <StepPanel stepKey={5}>
                 <Mannequin3D
                   initialMeasurements={activeMeasurements}
                   onRegenerate={handleAdjustAndRegenerate}
                   onContinue={() => setStep(6)}
                   isRegenerating={isGenerating}
+                  garmentType={analysis?.type ?? "tshirt"}
                 />
                 {generateError && (
                   <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">

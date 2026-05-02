@@ -10,6 +10,7 @@ import { Canvas, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
 import * as THREE from "three"
 import type { SizeMeasurements } from "@/lib/types/pattern"
+import type { GarmentType } from "@/lib/patterns/index"
 import {
   buildGarmentMeshData,
   makeAnatomy,
@@ -28,9 +29,10 @@ interface MannequinProps {
   measurements: SizeMeasurements
   fabric: FabricKey
   simEnabled: boolean
+  garmentType: GarmentType
 }
 
-function Mannequin({ measurements, fabric, simEnabled }: MannequinProps) {
+function Mannequin({ measurements, fabric, simEnabled, garmentType }: MannequinProps) {
   const groupRef = useRef<THREE.Group>(null)
 
   useFrame((_state, delta) => {
@@ -71,11 +73,11 @@ function Mannequin({ measurements, fabric, simEnabled }: MannequinProps) {
 
   // Meshs triangulés + simulation Verlet par pièce.
   const sim = useMemo(() => {
-    const meshes = buildGarmentMeshData(measurements)
+    const meshes = buildGarmentMeshData(measurements, garmentType)
     const anatomy = makeAnatomy(measurements)
     const cloths = meshes.map((m) => buildClothForPiece(m, anatomy))
     return { meshes, cloths, anatomy }
-  }, [measurements])
+  }, [measurements, garmentType])
 
   // Boucle de simulation : à chaque frame, on avance Verlet et on synchronise
   // les positions vers la BufferGeometry. Quand simEnabled=false, le mesh
@@ -193,12 +195,14 @@ interface MannequinSceneProps {
   measurements: SizeMeasurements
   fabric: FabricKey
   simEnabled?: boolean
+  garmentType?: GarmentType
 }
 
 export function MannequinScene({
   measurements,
   fabric,
   simEnabled = true,
+  garmentType = "tshirt",
 }: MannequinSceneProps) {
   return (
     <div className="relative w-full aspect-square rounded-xl bg-gradient-to-b from-purple-50 to-gray-100 overflow-hidden border border-gray-200">
@@ -217,7 +221,12 @@ export function MannequinScene({
         />
         <directionalLight position={[-2, 1, -1]} intensity={0.35} />
 
-        <Mannequin measurements={measurements} fabric={fabric} simEnabled={simEnabled} />
+        <Mannequin
+          measurements={measurements}
+          fabric={fabric}
+          simEnabled={simEnabled}
+          garmentType={garmentType}
+        />
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]} receiveShadow>
           <circleGeometry args={[1.2, 48]} />

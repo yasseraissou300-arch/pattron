@@ -10,8 +10,20 @@
 import * as THREE from "three"
 import Delaunator from "delaunator"
 import type { SizeMeasurements } from "@/lib/types/pattern"
+import type { GarmentType } from "@/lib/patterns/index"
 
 const CM_TO_M = 0.01
+
+// Longueurs en cm de chaque type de vêtement (utilisées pour le drapé 3D).
+function garmentLengthCm(m: SizeMeasurements, type: GarmentType): number {
+  switch (type) {
+    case "tshirt": return m.longueurDos
+    case "dress":  return Math.round(m.longueurDos * 2.0)   // mi-genou
+    case "shirt":  return Math.round(m.longueurDos * 1.25)  // bassin + un peu
+    case "skirt":  return Math.round(m.longueurDos * 1.0)   // jupe = de la taille au mi-genou
+    case "pants":  return 0                                 // pas de mesh torse pour pants
+  }
+}
 
 // ─── Anatomie du mannequin ───────────────────────────────────────────────────
 
@@ -109,21 +121,22 @@ function sampleCubicBezier(
 // ─── Outlines de chaque pièce ────────────────────────────────────────────────
 
 interface PieceOutline {
-  name: "front" | "back" | "sleeve"
+  name: "front" | "back" | "sleeve" | "skirt"
   outline: THREE.Vector2[]
   onFold: boolean
   widthCm: number
   heightCm: number
 }
 
-function frontOutline(m: SizeMeasurements): PieceOutline {
+function frontOutline(m: SizeMeasurements, ph: number): PieceOutline {
   const pw = m.poitrine / 4 + 1
-  const ph = m.longueurDos
   const nw = 4
   const nd = 7
   const sw = m.epaule / 2
   const sd = 1.5
-  const ad = Math.round(ph * 0.34)
+  // Profondeur d'emmanchure : basée sur longueurDos (taille du buste), pas sur la
+  // longueur totale de la pièce — sinon une robe aurait des emmanchures gigantesques.
+  const ad = Math.round(m.longueurDos * 0.34)
 
   const A = new THREE.Vector2(0,  nd)
   const B = new THREE.Vector2(nw, 0)
@@ -150,14 +163,13 @@ function frontOutline(m: SizeMeasurements): PieceOutline {
   return { name: "front", outline, onFold: true, widthCm: pw, heightCm: ph }
 }
 
-function backOutline(m: SizeMeasurements): PieceOutline {
+function backOutline(m: SizeMeasurements, ph: number): PieceOutline {
   const pw = m.poitrine / 4 + 1
-  const ph = m.longueurDos
   const nw = 4
   const nd = 3
   const sw = m.epaule / 2
   const sd = 1.5
-  const ad = Math.round(ph * 0.34)
+  const ad = Math.round(m.longueurDos * 0.34)
 
   const A = new THREE.Vector2(0,  nd)
   const B = new THREE.Vector2(nw, 0)
@@ -182,6 +194,27 @@ function backOutline(m: SizeMeasurements): PieceOutline {
   outline.push(...sampleQuarterEllipse(neckCenter, nw, nd, (3 * Math.PI) / 2, Math.PI, 6))
 
   return { name: "back", outline, onFold: true, widthCm: pw, heightCm: ph }
+}
+
+function skirtOutline(m: SizeMeasurements, ph: number): PieceOutline {
+  // Jupe trapézoïdale "au pli" : taille étroite, hem évasé.
+  const pwTop = m.taille / 4 + 0.5
+  const pwBot = m.hanches / 4 + 5
+
+  const outline: THREE.Vector2[] = [
+    new THREE.Vector2(0,     ph),          // bas pli
+    new THREE.Vector2(pwBot, ph),          // bas côté
+    new THREE.Vector2(pwTop, 0),           // taille côté
+    // (le pli x=0 ferme le polygone implicitement vers le 1er point)
+  ]
+
+  return {
+    name: "skirt",
+    outline,
+    onFold: true,
+    widthCm: Math.max(pwTop, pwBot),
+    heightCm: ph,
+  }
 }
 
 function sleeveOutline(m: SizeMeasurements): PieceOutline {
@@ -274,15 +307,49 @@ function triangulatePiece(outline: THREE.Vector2[]): Triangulation {
 function projectTorso(
   p2D: THREE.Vector2,
   pwCm: number,
+  _phCm: number,
+  anatomy: BodyAnatomy,
+  side: 1 | -1,
+  xMirror: 1 | -1,
+): THREE.Vector3 {
+  // Mapping direct cm → m : on descend depuis l'épaule de la longueur réelle
+  // de la pièce. Pour une robe (ph ~120 cm), bodyY peut être négatif (en
+  // dessous des hanches) — radiusAtHeight retourne alors le rayon des hanches.
+  const bodyY = anatomy.shoulderY - p2D.y * CM_TO_M
+  const angle = (p2D.x / pwCm) * (Math.PI / 2) * xMirror
+  const r = anatomy.radiusAtHeight(bodyY)
+  const x = r * Math.sin(angle)
+  const z = side * r * Math.cos(angle)
+  return new THREE.Vector3(x, bodyY, z)
+}
+
+// Pour la jupe : projection autour de la zone hanches/cuisses, depuis la
+// taille (~ torsoH * 0.45) descendant de la longueur de la pièce.
+function projectSkirt(
+  p2D: THREE.Vector2,
+  pwTopCm: number,
+  pwBotCm: number,
   phCm: number,
   anatomy: BodyAnatomy,
   side: 1 | -1,
   xMirror: 1 | -1,
 ): THREE.Vector3 {
-  const yNorm = p2D.y / phCm
-  const bodyY = anatomy.shoulderY * (1 - yNorm)
-  const angle = (p2D.x / pwCm) * (Math.PI / 2) * xMirror
-  const r = anatomy.radiusAtHeight(bodyY)
+  const waistY = anatomy.torsoH * 0.45
+  const bodyY = waistY - p2D.y * CM_TO_M
+
+  // Largeur half-width interpolée linéairement → angle qui couvre toujours
+  // 90° entre fold et seam, indépendamment de l'évasement.
+  const yNorm = Math.max(0, Math.min(1, p2D.y / phCm))
+  const pwAtY = pwTopCm + (pwBotCm - pwTopCm) * yNorm
+  const angle = (p2D.x / pwAtY) * (Math.PI / 2) * xMirror
+
+  // Le rayon utilisé : on combine rayon du corps (pour le haut snug) avec un
+  // léger boost lié au flare au hem. yNorm=0 → r = bodyR (snug à la taille),
+  // yNorm=1 → r ≈ bodyR * 1.15 (légère ouverture A-line).
+  const bodyR = anatomy.radiusAtHeight(bodyY)
+  const flareScale = 1 + 0.15 * yNorm
+  const r = bodyR * flareScale
+
   const x = r * Math.sin(angle)
   const z = side * r * Math.cos(angle)
   return new THREE.Vector3(x, bodyY, z)
@@ -309,7 +376,7 @@ function projectSleeve(
 // ─── Build Mesh + Data ───────────────────────────────────────────────────────
 
 export interface PieceMeshData {
-  name: "front" | "back" | "sleeve-left" | "sleeve-right"
+  name: "front" | "back" | "sleeve-left" | "sleeve-right" | "skirt"
   geometry: THREE.BufferGeometry
   // Données nécessaires à la simulation Verlet :
   vertices2D: THREE.Vector2[]    // points 2D du polygone (boundary + interior)
@@ -419,20 +486,121 @@ function buildSleeveMeshData(
   }
 }
 
-// Format léger gardé pour rétrocompat (utilisé par MannequinScene Phase 2A).
+// Construit le mesh de la jupe : trapèze "au pli" miroitré pour former le
+// tube complet autour des hanches.
+function buildSkirtMeshData(
+  piece: PieceOutline,
+  anatomy: BodyAnatomy,
+  measurements: SizeMeasurements,
+): PieceMeshData {
+  const tri = triangulatePiece(piece.outline)
+  const { vertices2D, outlineLength, triangles } = tri
+
+  const pwTop = measurements.taille / 4 + 0.5
+  const pwBot = measurements.hanches / 4 + 5
+
+  const positionsRight = vertices2D.map((p) =>
+    projectSkirt(p, pwTop, pwBot, piece.heightCm, anatomy, 1, 1),
+  )
+  const positionsLeft = vertices2D.map((p) =>
+    projectSkirt(p, pwTop, pwBot, piece.heightCm, anatomy, 1, -1),
+  )
+
+  // La jupe a deux faces : front (z > 0) et back (z < 0). Les deux faces sont
+  // chacune mirroirées en x (right + left half). Donc 4 morceaux au total
+  // partageant la triangulation 2D.
+  const positionsBackRight = vertices2D.map((p) =>
+    projectSkirt(p, pwTop, pwBot, piece.heightCm, anatomy, -1, 1),
+  )
+  const positionsBackLeft = vertices2D.map((p) =>
+    projectSkirt(p, pwTop, pwBot, piece.heightCm, anatomy, -1, -1),
+  )
+
+  const N = vertices2D.length
+  const total = N * 4
+  const positions = new Float32Array(total * 3)
+  const writeBlock = (start: number, src: THREE.Vector3[]) => {
+    for (let i = 0; i < src.length; i++) {
+      positions[(start + i) * 3] = src[i].x
+      positions[(start + i) * 3 + 1] = src[i].y
+      positions[(start + i) * 3 + 2] = src[i].z
+    }
+  }
+  writeBlock(0,     positionsRight)
+  writeBlock(N,     positionsLeft)
+  writeBlock(N * 2, positionsBackRight)
+  writeBlock(N * 3, positionsBackLeft)
+
+  const indices: number[] = []
+  // Front-right : ordre direct
+  for (let i = 0; i < triangles.length; i++) indices.push(triangles[i])
+  // Front-left : inversé pour normales sortantes
+  for (let i = 0; i < triangles.length; i += 3) {
+    indices.push(N + triangles[i + 2], N + triangles[i + 1], N + triangles[i])
+  }
+  // Back-right : inversé
+  for (let i = 0; i < triangles.length; i += 3) {
+    indices.push(N * 2 + triangles[i + 2], N * 2 + triangles[i + 1], N * 2 + triangles[i])
+  }
+  // Back-left : direct
+  for (let i = 0; i < triangles.length; i++) indices.push(N * 3 + triangles[i])
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3))
+  geo.setIndex(indices)
+  geo.computeVertexNormals()
+
+  return {
+    name: "skirt",
+    geometry: geo,
+    vertices2D,
+    outlineLength,
+    triangles: indices,
+    positions3D: positions.slice(),
+    isTorso: false,    // pas de pin "side seam" : la jupe forme un tube complet
+    isMirror: true,    // multi-blocks : cloth-pieces gérera les pins basés sur outline
+    pwCm: piece.widthCm,
+    phCm: piece.heightCm,
+  }
+}
+
+// Format léger gardé pour rétrocompat.
 export interface PieceMesh {
   name: string
   geometry: THREE.BufferGeometry
 }
 
-export function buildGarmentMesh(measurements: SizeMeasurements): PieceMesh[] {
-  return buildGarmentMeshData(measurements).map((d) => ({ name: d.name, geometry: d.geometry }))
+export function buildGarmentMesh(
+  measurements: SizeMeasurements,
+  garmentType: GarmentType = "tshirt",
+): PieceMesh[] {
+  return buildGarmentMeshData(measurements, garmentType).map((d) => ({
+    name: d.name,
+    geometry: d.geometry,
+  }))
 }
 
-export function buildGarmentMeshData(measurements: SizeMeasurements): PieceMeshData[] {
+export function buildGarmentMeshData(
+  measurements: SizeMeasurements,
+  garmentType: GarmentType = "tshirt",
+): PieceMeshData[] {
   const anatomy = makeAnatomy(measurements)
-  const front = frontOutline(measurements)
-  const back = backOutline(measurements)
+  const length = garmentLengthCm(measurements, garmentType)
+
+  // Pants : pas de mesh torse possible (anatomie jambes incompatible avec ce
+  // moteur). Le caller (page /generate) doit sauter l'étape 3D.
+  if (garmentType === "pants") return []
+
+  if (garmentType === "skirt") {
+    const skirt = skirtOutline(measurements, length)
+    return [buildSkirtMeshData(skirt, anatomy, measurements)]
+  }
+
+  // tshirt / dress / shirt : 4 pièces (front + back + 2 manches). La longueur
+  // pilote la descente du torse ; la profondeur d'emmanchure et la largeur
+  // au niveau de la poitrine restent ancrées sur longueurDos.
+  const front = frontOutline(measurements, length)
+  const back = backOutline(measurements, length)
   const sleeve = sleeveOutline(measurements)
 
   return [
