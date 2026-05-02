@@ -45,7 +45,6 @@ function AnalysisRow({ label, value }: { label: string; value: string }) {
 
 export function AnalysisPanel({ analysis, onConfirm, onRetry }: AnalysisPanelProps) {
   const confidencePct = Math.round(analysis.confidence * 100)
-  const isMvpSupported = analysis.type === "tshirt"
 
   return (
     <div className="space-y-4">
@@ -99,14 +98,6 @@ export function AnalysisPanel({ analysis, onConfirm, onRetry }: AnalysisPanelPro
           )}
         </div>
       </div>
-
-      {!isMvpSupported && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-          Le type &quot;{TYPE_LABELS[analysis.type]}&quot; n&apos;est pas encore disponible.
-          PatronAI prend en charge le t-shirt femme pour le moment. Les autres types arrivent bientôt.
-          Tu peux continuer avec le patron t-shirt ou reprendre une autre photo.
-        </div>
-      )}
 
       <div className="flex flex-col sm:flex-row gap-3">
         <button

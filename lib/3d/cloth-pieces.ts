@@ -58,6 +58,22 @@ function pinIndicesForSleeve(piece: PieceMeshData): Set<number> {
 }
 
 /**
+ * Pour la jupe : mesh à 4 blocs (front-right, front-left, back-right, back-left)
+ * partageant les mêmes vertices2D. Épingle le top (taille) dans les 4 blocs.
+ */
+function pinIndicesForSkirt(piece: PieceMeshData): Set<number> {
+  const pins = new Set<number>()
+  const N = piece.vertices2D.length
+  for (let i = 0; i < piece.outlineLength; i++) {
+    const p = piece.vertices2D[i]
+    if (p.y < PIN_TOL_CM) {
+      for (let block = 0; block < 4; block++) pins.add(block * N + i)
+    }
+  }
+  return pins
+}
+
+/**
  * Construit les contraintes de couture entre les deux moitiés mirroirées
  * d'une pièce "au pli" : pour chaque vertex sur le pli (x2D ≈ 0), la version
  * "moitié droite" et "moitié gauche" doivent rester collées. Rest = 0 dans le
@@ -134,9 +150,12 @@ export function buildClothForPiece(
   const totalVerts = piece.positions3D.length / 3
   const pinned = new Uint8Array(totalVerts)
 
-  const pinSet = piece.isTorso
-    ? pinIndicesForTorso(piece)
-    : pinIndicesForSleeve(piece)
+  const isSkirt = piece.name === "skirt"
+  const pinSet = isSkirt
+    ? pinIndicesForSkirt(piece)
+    : piece.isTorso
+      ? pinIndicesForTorso(piece)
+      : pinIndicesForSleeve(piece)
   for (const idx of pinSet) pinned[idx] = 1
 
   const dist = buildDistanceConstraints(piece)
@@ -144,8 +163,9 @@ export function buildClothForPiece(
   const allJ = [...dist.j]
   const allRest = [...dist.rest]
 
-  // Pour les pièces "au pli" (torso), ajoute les coutures entre les moitiés.
-  if (piece.isMirror) {
+  // Couture du pli pour torso (front/back/dress) : 2 moitiés. La jupe a 4 blocs
+  // et son tube se referme automatiquement par le pinning de la taille.
+  if (piece.isMirror && piece.isTorso) {
     const stitch = foldStitchPairs(piece)
     allI.push(...stitch.i)
     allJ.push(...stitch.j)
