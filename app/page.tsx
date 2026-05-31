@@ -25,6 +25,9 @@ function Nav() {
           <Link href="#tarifs" className="hover:text-purple-600 transition-colors">
             Tarifs
           </Link>
+          <Link href="/pose" className="hover:text-purple-600 transition-colors">
+            Poses IA
+          </Link>
         </div>
         <Link
           href="/generate"

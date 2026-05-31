@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { generatePattern, isValidGarmentType } from "@/lib/patterns/index"
+import type { DesignParams } from "@/lib/patterns/params"
 
 const MeasurementsSchema = z.object({
   poitrine:       z.number().min(60).max(160),
@@ -20,6 +21,9 @@ const RequestSchema = z.object({
   options: z
     .object({
       seamAllowance: z.number().min(0.5).max(3).default(1),
+      // Paramètres de design optionnels (créateur paramétrique). Les valeurs
+      // hors bornes sont ramenées dans l'intervalle par resolveParams().
+      params: z.record(z.string(), z.number()).optional(),
     })
     .optional()
     .default({ seamAllowance: 1 }),
@@ -37,7 +41,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const result = generatePattern(garmentType, measurements, options.seamAllowance)
+    const result = generatePattern(
+      garmentType,
+      measurements,
+      options.seamAllowance,
+      options.params as DesignParams | undefined
+    )
 
     return NextResponse.json(result)
   } catch (error) {

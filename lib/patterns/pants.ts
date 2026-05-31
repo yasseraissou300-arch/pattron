@@ -7,29 +7,25 @@ import {
   circle, notch, grainArrow, dimension, dimensionV, svgWrap,
   pieceLabel, rectPiece,
 } from "./helpers"
+import { resolveParams, type ResolvedParams, type DesignParams } from "./params"
 
 // Hauteur de fourche (taille → entrejambe) ≈ longueurDos × 0.46
 function riseHeight(m: SizeMeasurements): number {
   return Math.round(m.longueurDos * 0.46)
 }
 
-// Entrejambe (longueur intérieure jambe) ≈ longueurDos × 1.63
-function inseamLength(m: SizeMeasurements): number {
-  return Math.round(m.longueurDos * 1.63)
-}
-
 // ─── Pièce 1 : Devant pantalon ───────────────────────────────────────────────
 
-function generatePantsFront(m: SizeMeasurements, sa: number): PatternPiece {
-  const rise   = riseHeight(m)
-  const inseam = inseamLength(m)
+function generatePantsFront(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const rise   = riseHeight(m) + p.riseAdjust
+  const inseam = p.legLength
   const total  = rise + inseam
 
-  const tw  = m.taille / 4 + 0.5      // demi-taille devant
+  const tw  = m.taille / 4 + p.waistEase / 4 // demi-taille devant
   const hw  = m.hanches / 4 + 0.5     // demi-hanche devant (à la fourche)
   const crotchExt = Math.round(m.hanches * 0.06)  // extension fourche devant (~5.4 cm M)
   const legW_top  = hw + crotchExt    // largeur à l'entrejambe
-  const legW_bot  = 10.5              // demi-largeur bas de jambe (21 cm ouverture)
+  const legW_bot  = p.legOpening / 2  // demi-largeur bas de jambe
 
   const mx = 2, my = 2
 
@@ -132,15 +128,15 @@ function generatePantsFront(m: SizeMeasurements, sa: number): PatternPiece {
 
 // ─── Pièce 2 : Dos pantalon ───────────────────────────────────────────────────
 
-function generatePantsBack(m: SizeMeasurements, sa: number): PatternPiece {
-  const rise   = riseHeight(m)
-  const inseam = inseamLength(m)
+function generatePantsBack(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const rise   = riseHeight(m) + p.riseAdjust
+  const inseam = p.legLength
   const total  = rise + inseam
 
-  const tw  = m.taille / 4 + 1      // dos plus large à la taille
+  const tw  = m.taille / 4 + p.waistEase / 4 + 0.5 // dos plus large à la taille
   const hw  = m.hanches / 4 + 1.5   // dos plus large aux hanches
   const crotchExt = Math.round(m.hanches * 0.11)  // extension fourche dos (~10 cm M)
-  const legW_bot  = 11
+  const legW_bot  = p.legOpening / 2 + 0.5
 
   const mx = 2, my = 2
 
@@ -307,16 +303,16 @@ function generateSewingGuide(): SewingStep[] {
 
 export function generatePattern(
   measurements: SizeMeasurements,
-  seamAllowance = 1
+  seamAllowance = 1,
+  overrides?: DesignParams
 ): PatternResult {
   const sa = seamAllowance
-  const rise   = riseHeight(measurements)
-  const inseam = inseamLength(measurements)
-  const total  = rise + inseam
+  const p = resolveParams("pants", measurements, overrides)
+  const total = riseHeight(measurements) + p.riseAdjust + p.legLength
 
   const pieces = [
-    generatePantsFront(measurements, sa),
-    generatePantsBack(measurements, sa),
+    generatePantsFront(measurements, sa, p),
+    generatePantsBack(measurements, sa, p),
     generateWaistband(measurements, sa),
   ]
 

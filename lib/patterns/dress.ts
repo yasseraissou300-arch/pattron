@@ -7,6 +7,7 @@ import {
   circle, notch, grainArrow, grainArrowH, dimension, svgWrap,
   foldIndicator, pieceLabel, rectPiece,
 } from "./helpers"
+import { resolveParams, type ResolvedParams, type DesignParams } from "./params"
 
 // Longueur robe = mi-genou (~longueurDos × 2.0)
 function dressLength(m: SizeMeasurements): number {
@@ -15,22 +16,23 @@ function dressLength(m: SizeMeasurements): number {
 
 // ─── Pièce 1 : Devant ────────────────────────────────────────────────────────
 
-function generateDressFront(m: SizeMeasurements, sa: number): PatternPiece {
-  const ph  = dressLength(m)
-  const nw  = 4              // demi-largeur encolure
-  const nd  = 7              // profondeur encolure devant
+function generateDressFront(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const ph  = p.bodyLength
+  const nw  = p.necklineWidth // demi-largeur encolure
+  const nd  = p.necklineDepth // profondeur encolure devant
   const sw  = m.epaule / 2  // demi-largeur épaule
   const sd  = 1.5            // chute d'épaule
   const ad  = Math.round(m.longueurDos * 0.34) // profondeur emmanchure
 
   // Largeurs à différents niveaux
-  const bwBust  = m.poitrine / 4 + 1      // demi-largeur poitrine
+  const bwBust  = m.poitrine / 4 + p.ease / 4 // demi-largeur poitrine
   const bwWaist = m.taille / 4 + 0.5      // demi-largeur taille
   const bwHip   = m.hanches / 4 + 1       // demi-largeur hanches
   const bwHem   = m.hanches / 4 + 1.5     // demi-largeur bas
 
-  const hipY  = Math.round(ph * 0.42)     // niveau hanches sur la longueur totale
-  const waistY = Math.round(ph * 0.26)    // niveau taille
+  // Niveaux taille/hanches ancrés sur la mesure dos (anatomiques), bornés sous le bas.
+  const hipY   = Math.min(Math.round(m.longueurDos * 0.84), ph - 6)
+  const waistY = Math.min(Math.round(m.longueurDos * 0.52), hipY - 6)
 
   const mx = 2, my = 2
 
@@ -114,21 +116,21 @@ function generateDressFront(m: SizeMeasurements, sa: number): PatternPiece {
 
 // ─── Pièce 2 : Dos ───────────────────────────────────────────────────────────
 
-function generateDressBack(m: SizeMeasurements, sa: number): PatternPiece {
-  const ph  = dressLength(m)
-  const nw  = 4
+function generateDressBack(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const ph  = p.bodyLength
+  const nw  = p.necklineWidth
   const nd  = 3              // encolure dos plus plate
   const sw  = m.epaule / 2
   const sd  = 1.5
   const ad  = Math.round(m.longueurDos * 0.34)
 
-  const bwBust  = m.poitrine / 4 + 1
+  const bwBust  = m.poitrine / 4 + p.ease / 4
   const bwWaist = m.taille / 4 + 1       // dos légèrement plus large
   const bwHip   = m.hanches / 4 + 1.5
   const bwHem   = m.hanches / 4 + 2
 
-  const hipY   = Math.round(ph * 0.42)
-  const waistY = Math.round(ph * 0.26)
+  const hipY   = Math.min(Math.round(m.longueurDos * 0.84), ph - 6)
+  const waistY = Math.min(Math.round(m.longueurDos * 0.52), hipY - 6)
   const mx = 2, my = 2
 
   const Ax = mx,         Ay = my + nd
@@ -208,10 +210,10 @@ function generateDressBack(m: SizeMeasurements, sa: number): PatternPiece {
 
 // ─── Pièce 3 : Manche courte ─────────────────────────────────────────────────
 
-function generateSleeve(m: SizeMeasurements, sa: number): PatternPiece {
-  const capW    = 18
-  const slH     = m.longueurManche
-  const botW    = 16
+function generateSleeve(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const capW    = p.sleeveWidth
+  const slH     = p.sleeveLength
+  const botW    = p.sleeveWidth - 2
   const halfCap = capW / 2
   const halfBot = botW / 2
   const capH    = Math.min(slH * 0.5, 8)
@@ -379,20 +381,20 @@ function generateSewingGuide(): SewingStep[] {
 
 export function generatePattern(
   measurements: SizeMeasurements,
-  seamAllowance = 1
+  seamAllowance = 1,
+  overrides?: DesignParams
 ): PatternResult {
   const sa = seamAllowance
-  const ph = dressLength(measurements)
-  const bwHem = measurements.hanches / 4 + 2
+  const p = resolveParams("dress", measurements, overrides)
 
   const pieces = [
-    generateDressFront(measurements, sa),
-    generateDressBack(measurements, sa),
-    generateSleeve(measurements, sa),
+    generateDressFront(measurements, sa, p),
+    generateDressBack(measurements, sa, p),
+    generateSleeve(measurements, sa, p),
     generateNeckband(measurements, sa),
   ]
 
-  const fabricNeededCm = Math.ceil(ph + measurements.longueurDos * 0.4 + 20)
+  const fabricNeededCm = Math.ceil(p.bodyLength + measurements.longueurDos * 0.4 + 20)
 
   return {
     pieces,

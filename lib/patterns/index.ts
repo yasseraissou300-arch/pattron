@@ -2,6 +2,7 @@
 // Ajouter un nouveau type de vêtement ici suffit à l'activer partout.
 
 import type { SizeMeasurements, PatternResult } from "../types/pattern"
+import type { DesignParams } from "./params"
 import { generatePattern as generateTshirt }  from "./tshirt"
 import { generatePattern as generateSkirt }   from "./skirt"
 import { generatePattern as generateDress }   from "./dress"
@@ -10,7 +11,10 @@ import { generatePattern as generatePants }   from "./pants"
 
 export type GarmentType = "tshirt" | "dress" | "skirt" | "pants" | "shirt"
 
-const ENGINES: Record<GarmentType, (m: SizeMeasurements, sa: number) => PatternResult> = {
+const ENGINES: Record<
+  GarmentType,
+  (m: SizeMeasurements, sa: number, overrides?: DesignParams) => PatternResult
+> = {
   tshirt: generateTshirt,
   skirt:  generateSkirt,
   dress:  generateDress,
@@ -29,13 +33,14 @@ export const GARMENT_LABELS: Record<GarmentType, string> = {
 export function generatePattern(
   garmentType: GarmentType,
   measurements: SizeMeasurements,
-  seamAllowance = 1
+  seamAllowance = 1,
+  overrides?: DesignParams
 ): PatternResult {
   const engine = ENGINES[garmentType]
   if (!engine) {
     throw new Error(`Type de vêtement non supporté : ${garmentType}`)
   }
-  return engine(measurements, seamAllowance)
+  return engine(measurements, seamAllowance, overrides)
 }
 
 export function isValidGarmentType(type: string): type is GarmentType {

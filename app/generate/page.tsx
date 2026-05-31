@@ -10,10 +10,13 @@ import { UploadZone } from "@/components/UploadZone"
 import { AnalysisPanel } from "@/components/AnalysisPanel"
 import { SizeSelector } from "@/components/SizeSelector"
 import { PatternViewer } from "@/components/PatternViewer"
+import { PatternCustomizer } from "@/components/PatternCustomizer"
 import { Mannequin3D } from "@/components/Mannequin3D"
 import { SewingGuide } from "@/components/SewingGuide"
 import { DownloadActions } from "@/components/DownloadActions"
 import type { GarmentAnalysis } from "@/lib/ai"
+import type { GarmentType } from "@/lib/patterns/index"
+import type { DesignParams } from "@/lib/patterns/params"
 import type { EuSize, SizeMeasurements, PatternResult } from "@/lib/types/pattern"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -114,6 +117,11 @@ export default function GeneratePage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
 
+  // Paramètres de design (créateur paramétrique) — overrides épars, vides par défaut.
+  const [designParams, setDesignParams] = useState<DesignParams>({})
+
+  const garmentType: GarmentType = (analysis?.type as GarmentType) ?? "tshirt"
+
   // ── Handlers ──
 
   const handleImageReady = useCallback(
@@ -157,7 +165,9 @@ export default function GeneratePage() {
     }
   }
 
-  const handleGeneratePatterns = async () => {
+  // Régénère les pièces pour toutes les tailles sélectionnées avec les
+  // paramètres de design fournis. Ne change pas d'étape (le caller décide).
+  const regeneratePatterns = async (params: DesignParams): Promise<boolean> => {
     setIsGenerating(true)
     setGenerateError(null)
 
@@ -175,9 +185,9 @@ export default function GeneratePage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            garmentType: analysis?.type ?? "tshirt",
+            garmentType,
             measurements,
-            options: { seamAllowance: 1 },
+            options: { seamAllowance: 1, params },
           }),
         })
         const data = await res.json()
@@ -186,16 +196,27 @@ export default function GeneratePage() {
       }
 
       setPatternBySize(results)
-      setStep(4)
+      return true
     } catch (err) {
       setGenerateError(
         err instanceof Error
           ? err.message
           : "Impossible de générer le patron. Vérifie tes mesures et réessaie."
       )
+      return false
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  const handleGeneratePatterns = async () => {
+    const ok = await regeneratePatterns(designParams)
+    if (ok) setStep(4)
+  }
+
+  // Appliqué depuis le créateur paramétrique (étape 4) : régénère sur place.
+  const handleCustomizeApply = async () => {
+    await regeneratePatterns(designParams)
   }
 
   // Régénération du patron depuis l'étape 5 (Mannequin 3D) avec mesures ajustées.
@@ -209,9 +230,9 @@ export default function GeneratePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          garmentType: analysis?.type ?? "tshirt",
+          garmentType,
           measurements: adjusted,
-          options: { seamAllowance: 1 },
+          options: { seamAllowance: 1, params: designParams },
         }),
       })
       const data = await res.json()
@@ -241,6 +262,7 @@ export default function GeneratePage() {
     setUseCustom(false)
     setCustomMeasurements({})
     setPatternBySize({})
+    setDesignParams({})
     setGenerateError(null)
   }
 
@@ -403,6 +425,19 @@ export default function GeneratePage() {
                     selectedSizes={selectedSizes}
                     useCustom={useCustom}
                   />
+                  <PatternCustomizer
+                    garmentType={garmentType}
+                    measurements={activeMeasurements}
+                    params={designParams}
+                    onChange={setDesignParams}
+                    onApply={handleCustomizeApply}
+                    isBusy={isGenerating}
+                  />
+                  {generateError && (
+                    <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                      {generateError}
+                    </p>
+                  )}
                   <button
                     onClick={() => setStep(analysis?.type === "pants" ? 6 : 5)}
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
@@ -460,6 +495,8 @@ export default function GeneratePage() {
                   measurements={activeMeasurements}
                   sizeName={activeSizeName}
                   selectedSizes={selectedSizes}
+                  garmentType={garmentType}
+                  params={designParams}
                   onRestart={handleRestart}
                 />
               </StepPanel>

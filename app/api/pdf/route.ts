@@ -3,8 +3,9 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
-import { generatePattern } from "@/lib/patterns/tshirt"
+import { generatePattern } from "@/lib/patterns/index"
 import { generatePdfA4, generatePdfA0 } from "@/lib/pdf"
+import type { DesignParams } from "@/lib/patterns/params"
 
 const MeasurementsSchema = z.object({
   poitrine: z.number().min(60).max(160),
@@ -16,19 +17,27 @@ const MeasurementsSchema = z.object({
 })
 
 const RequestSchema = z.object({
-  garmentType: z.enum(["tshirt"]),
+  garmentType: z.enum(["tshirt", "dress", "skirt", "pants", "shirt"]),
   measurements: MeasurementsSchema,
   sizeName: z.string().default("Personnalisé"),
   format: z.enum(["A4", "A0", "projector"]),
+  // Paramètres de design optionnels — pour un PDF fidèle au patron personnalisé.
+  params: z.record(z.string(), z.number()).optional(),
 })
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { garmentType, measurements, sizeName, format } = RequestSchema.parse(body)
+    const { garmentType, measurements, sizeName, format, params } =
+      RequestSchema.parse(body)
 
-    // Génération des pièces
-    const patternResult = generatePattern(measurements)
+    // Génération des pièces via le routeur (respecte le type + les paramètres).
+    const patternResult = generatePattern(
+      garmentType,
+      measurements,
+      1,
+      params as DesignParams | undefined
+    )
 
     let pdfBytes: Uint8Array
 
@@ -45,7 +54,7 @@ export async function POST(request: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="patronai-tshirt-${sizeName}-${format}.pdf"`,
+        "Content-Disposition": `attachment; filename="patronai-${garmentType}-${sizeName}-${format}.pdf"`,
         "Cache-Control": "no-store",
       },
     })

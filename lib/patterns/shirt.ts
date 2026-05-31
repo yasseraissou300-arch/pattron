@@ -7,27 +7,18 @@ import {
   circle, notch, grainArrow, dimension, svgWrap,
   foldIndicator, pieceLabel, rectPiece,
 } from "./helpers"
-
-// Longueur chemise = hanches (~longueurDos × 1.05)
-function shirtLength(m: SizeMeasurements): number {
-  return Math.round(m.longueurDos * 1.05)
-}
-
-// Longueur manche longue (~59 cm pour M)
-function longSleeveLength(m: SizeMeasurements): number {
-  return Math.round(m.longueurDos * 0.95)
-}
+import { resolveParams, type ResolvedParams, type DesignParams } from "./params"
 
 // ─── Pièce 1 : Devant (demi-pièce, PAS au pli — boutons au centre) ────────────
 
-function generateShirtFront(m: SizeMeasurements, sa: number, side: "right" | "left"): PatternPiece {
-  const ph  = shirtLength(m)
-  const nw  = 3.5            // demi-largeur encolure
-  const nd  = 6.5            // profondeur encolure devant
+function generateShirtFront(m: SizeMeasurements, sa: number, side: "right" | "left", p: ResolvedParams): PatternPiece {
+  const ph  = p.bodyLength
+  const nw  = p.necklineWidth // demi-largeur encolure
+  const nd  = p.necklineDepth // profondeur encolure devant
   const sw  = m.epaule / 2
   const sd  = 1.5
   const ad  = Math.round(m.longueurDos * 0.34)
-  const bw  = m.poitrine / 4 + 1.5   // demi-largeur corps (aisance chemise)
+  const bw  = m.poitrine / 4 + p.ease / 4 // demi-largeur corps (aisance chemise)
   const bandW = 2.5                    // bande de boutonnage / boutonnières
 
   const mx = 2, my = 2
@@ -120,14 +111,14 @@ function generateShirtFront(m: SizeMeasurements, sa: number, side: "right" | "le
 
 // ─── Pièce 3 : Dos ───────────────────────────────────────────────────────────
 
-function generateShirtBack(m: SizeMeasurements, sa: number): PatternPiece {
-  const ph  = shirtLength(m)
-  const nw  = 3.5
+function generateShirtBack(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const ph  = p.bodyLength
+  const nw  = p.necklineWidth
   const nd  = 2.5            // encolure dos plate
   const sw  = m.epaule / 2
   const sd  = 1.5
   const ad  = Math.round(m.longueurDos * 0.34)
-  const bw  = m.poitrine / 4 + 2    // aisance chemise dos légèrement plus large
+  const bw  = m.poitrine / 4 + p.ease / 4 + 0.5 // aisance chemise dos légèrement plus large
   const mx = 2, my = 2
 
   const Ax = mx,      Ay = my + nd
@@ -197,10 +188,10 @@ function generateShirtBack(m: SizeMeasurements, sa: number): PatternPiece {
 
 // ─── Pièce 4 : Manche longue ─────────────────────────────────────────────────
 
-function generateLongSleeve(m: SizeMeasurements, sa: number): PatternPiece {
-  const slH    = longSleeveLength(m)
-  const capW   = 18          // largeur tête de manche (idem t-shirt)
-  const botW   = 13          // largeur bas de manche longue (avant poignet)
+function generateLongSleeve(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const slH    = p.sleeveLength
+  const capW   = p.sleeveWidth   // largeur tête de manche (idem t-shirt)
+  const botW   = p.sleeveWidth - 5 // largeur bas de manche longue (avant poignet)
   const halfCap = capW / 2
   const halfBot = botW / 2
   const capH   = 7.5
@@ -387,24 +378,23 @@ function generateSewingGuide(): SewingStep[] {
 
 export function generatePattern(
   measurements: SizeMeasurements,
-  seamAllowance = 1
+  seamAllowance = 1,
+  overrides?: DesignParams
 ): PatternResult {
   const sa = seamAllowance
-  const ph = shirtLength(measurements)
-  const slH = longSleeveLength(measurements)
-  const bw = measurements.poitrine / 4 + 2
+  const p = resolveParams("shirt", measurements, overrides)
 
   const pieces = [
-    generateShirtFront(measurements, sa, "right"),
-    generateShirtFront(measurements, sa, "left"),
-    generateShirtBack(measurements, sa),
-    generateLongSleeve(measurements, sa),
+    generateShirtFront(measurements, sa, "right", p),
+    generateShirtFront(measurements, sa, "left", p),
+    generateShirtBack(measurements, sa, p),
+    generateLongSleeve(measurements, sa, p),
     generateCollar(measurements, sa),
     generateCollarStand(measurements, sa),
     generateCuff(measurements, sa),
   ]
 
-  const fabricNeededCm = Math.ceil(ph + slH + 30)
+  const fabricNeededCm = Math.ceil(p.bodyLength + p.sleeveLength + 30)
 
   return {
     pieces,

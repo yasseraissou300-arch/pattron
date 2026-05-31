@@ -7,6 +7,7 @@ import {
   circle, notch, grainArrow, dimension, svgWrap,
   foldIndicator, pieceLabel, rectPiece,
 } from "./helpers"
+import { resolveParams, type ResolvedParams, type DesignParams } from "./params"
 
 function skirtLength(m: SizeMeasurements): number {
   return Math.round(m.longueurDos * 0.88) // ~53 cm en taille M (mi-cuisse)
@@ -14,12 +15,12 @@ function skirtLength(m: SizeMeasurements): number {
 
 // ─── Pièce 1 : Devant ────────────────────────────────────────────────────────
 
-function generateSkirtFront(m: SizeMeasurements, sa: number): PatternPiece {
-  const ph  = skirtLength(m)
-  const tw  = m.taille / 4 + 1     // demi-taille finie
-  const bw  = m.hanches / 4 + 2    // demi-bas finie (légère évasure A-line)
-  const hipY = Math.round(ph * 0.38) // profondeur hanche (≈20 cm)
+function generateSkirtFront(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const ph  = p.bodyLength
+  const tw  = m.taille / 4 + p.waistEase / 4 // demi-taille finie
   const hw  = m.hanches / 4 + 1.5  // demi-hanche finie
+  const bw  = hw + p.flare         // demi-bas finie (évasure A-line)
+  const hipY = Math.min(Math.round(skirtLength(m) * 0.38), ph - 8) // profondeur hanche (≈20 cm)
   const mx = 2, my = 2
 
   // Sew points (taille finie)
@@ -92,12 +93,12 @@ function generateSkirtFront(m: SizeMeasurements, sa: number): PatternPiece {
 
 // ─── Pièce 2 : Dos ───────────────────────────────────────────────────────────
 
-function generateSkirtBack(m: SizeMeasurements, sa: number): PatternPiece {
-  const ph  = skirtLength(m)
-  const tw  = m.taille / 4 + 1.5   // dos légèrement plus large à la taille
-  const bw  = m.hanches / 4 + 2.5  // plus de volume aux hanches dos
-  const hipY = Math.round(ph * 0.38)
+function generateSkirtBack(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const ph  = p.bodyLength
+  const tw  = m.taille / 4 + p.waistEase / 4 + 0.5 // dos légèrement plus large à la taille
   const hw  = m.hanches / 4 + 2
+  const bw  = hw + p.flare          // plus de volume aux hanches dos
+  const hipY = Math.min(Math.round(skirtLength(m) * 0.38), ph - 8)
   const mx = 2, my = 2
 
   // Dos : courbure taille plus plate (0.5 cm) vs devant (1.2 cm)
@@ -244,18 +245,19 @@ function generateSewingGuide(): SewingStep[] {
 
 export function generatePattern(
   measurements: SizeMeasurements,
-  seamAllowance = 1
+  seamAllowance = 1,
+  overrides?: DesignParams
 ): PatternResult {
   const sa = seamAllowance
-  const ph = skirtLength(measurements)
+  const p = resolveParams("skirt", measurements, overrides)
 
   const pieces = [
-    generateSkirtFront(measurements, sa),
-    generateSkirtBack(measurements, sa),
+    generateSkirtFront(measurements, sa, p),
+    generateSkirtBack(measurements, sa, p),
     generateWaistband(measurements, sa),
   ]
 
-  const fabricNeededCm = Math.ceil(ph * 2 + 20)
+  const fabricNeededCm = Math.ceil(p.bodyLength * 2 + 20)
 
   return {
     pieces,

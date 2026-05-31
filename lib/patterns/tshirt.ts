@@ -3,6 +3,7 @@
 // Les patrons incluent les marges de couture (configurable, défaut 1 cm).
 
 import type { SizeMeasurements, PatternPiece, PatternResult, SewingStep } from "../types/pattern"
+import { resolveParams, type ResolvedParams, type DesignParams } from "./params"
 
 // ─── Helpers SVG ─────────────────────────────────────────────────────────────
 
@@ -60,14 +61,14 @@ function pieceLabel(x: number, y: number, name: string, cuts: string, dims: stri
 
 // ─── Pièce 1 : Devant ────────────────────────────────────────────────────────
 
-function generateFront(m: SizeMeasurements, sa: number): PatternPiece {
-  const pw = m.poitrine / 4 + 1  // largeur demi-pièce finie (aisance incluse)
-  const ph = m.longueurDos        // hauteur finie
-  const nw = 4                    // demi-largeur encolure
-  const nd = 7                    // profondeur encolure devant
+function generateFront(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const pw = m.poitrine / 4 + p.ease / 4  // largeur demi-pièce finie (aisance incluse)
+  const ph = p.bodyLength         // hauteur finie
+  const nw = p.necklineWidth      // demi-largeur encolure
+  const nd = p.necklineDepth      // profondeur encolure devant
   const sw = m.epaule / 2        // demi-largeur épaule
   const sd = 1.5                  // chute d'épaule
-  const ad = Math.round(ph * 0.34) // profondeur emmanchure
+  const ad = Math.round(m.longueurDos * 0.34) // profondeur emmanchure (ancrée sur la mesure dos)
 
   // Marge visuelle autour de la pièce
   const mx = 2  // marge gauche (côté pli)
@@ -152,14 +153,14 @@ function generateFront(m: SizeMeasurements, sa: number): PatternPiece {
 
 // ─── Pièce 2 : Dos ───────────────────────────────────────────────────────────
 
-function generateBack(m: SizeMeasurements, sa: number): PatternPiece {
-  const pw = m.poitrine / 4 + 1
-  const ph = m.longueurDos
-  const nw = 4
+function generateBack(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const pw = m.poitrine / 4 + p.ease / 4
+  const ph = p.bodyLength
+  const nw = p.necklineWidth
   const nd = 3   // encolure dos = 3 cm (moins profonde que devant)
   const sw = m.epaule / 2
   const sd = 1.5
-  const ad = Math.round(ph * 0.34)
+  const ad = Math.round(m.longueurDos * 0.34)
 
   const mx = 2
   const my = 2
@@ -236,10 +237,10 @@ function generateBack(m: SizeMeasurements, sa: number): PatternPiece {
 
 // ─── Pièce 3 : Manche ────────────────────────────────────────────────────────
 
-function generateSleeve(m: SizeMeasurements, sa: number): PatternPiece {
-  const capW  = 18  // largeur tête de manche
-  const slH   = m.longueurManche  // hauteur totale
-  const botW  = 16  // largeur bas de manche
+function generateSleeve(m: SizeMeasurements, sa: number, p: ResolvedParams): PatternPiece {
+  const capW  = p.sleeveWidth   // largeur tête de manche
+  const slH   = p.sleeveLength  // hauteur totale
+  const botW  = p.sleeveWidth - 2 // largeur bas de manche
 
   const mx = 2
   const my = 2
@@ -501,14 +502,16 @@ function generateSewingGuide(): SewingStep[] {
 
 export function generatePattern(
   measurements: SizeMeasurements,
-  seamAllowance = 1
+  seamAllowance = 1,
+  overrides?: DesignParams
 ): PatternResult {
   const sa = seamAllowance
+  const p = resolveParams("tshirt", measurements, overrides)
 
   const pieces = [
-    generateFront(measurements, sa),
-    generateBack(measurements, sa),
-    generateSleeve(measurements, sa),
+    generateFront(measurements, sa, p),
+    generateBack(measurements, sa, p),
+    generateSleeve(measurements, sa, p),
     generateNeckband(measurements, sa),
   ]
 
@@ -518,6 +521,6 @@ export function generatePattern(
     sewingGuide: generateSewingGuide(),
     estimatedTimeMinutes: 180,
     difficulty: 2,
-    fabricNeededCm: Math.ceil(measurements.longueurDos * 2 + 20),
+    fabricNeededCm: Math.ceil(p.bodyLength * 2 + 20),
   }
 }

@@ -3,11 +3,15 @@
 import { useState } from "react"
 import { FileDown, Share2, RotateCcw, Loader2 } from "lucide-react"
 import type { SizeMeasurements, EuSize } from "@/lib/types/pattern"
+import type { GarmentType } from "@/lib/patterns/index"
+import type { DesignParams } from "@/lib/patterns/params"
 
 interface DownloadActionsProps {
   measurements: SizeMeasurements
   sizeName: string
   selectedSizes: EuSize[]
+  garmentType: GarmentType
+  params?: DesignParams
   onRestart: () => void
 }
 
@@ -31,6 +35,8 @@ const FORMAT_INFO: Record<Format, { label: string; desc: string }> = {
 export function DownloadActions({
   measurements,
   sizeName,
+  garmentType,
+  params,
   onRestart,
 }: DownloadActionsProps) {
   const [loading, setLoading] = useState<Format | null>(null)
@@ -46,10 +52,11 @@ export function DownloadActions({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          garmentType: "tshirt",
+          garmentType,
           measurements,
           sizeName,
           format,
+          params,
         }),
       })
 
@@ -62,7 +69,7 @@ export function DownloadActions({
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = `patronai-tshirt-${sizeName}-${format}.pdf`
+      a.download = `patronai-${garmentType}-${sizeName}-${format}.pdf`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
