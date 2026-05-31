@@ -11,6 +11,7 @@ import { AnalysisPanel } from "@/components/AnalysisPanel"
 import { SizeSelector } from "@/components/SizeSelector"
 import { PatternViewer } from "@/components/PatternViewer"
 import { PatternCustomizer } from "@/components/PatternCustomizer"
+import { CuttingLayout } from "@/components/CuttingLayout"
 import { Mannequin3D } from "@/components/Mannequin3D"
 import { SewingGuide } from "@/components/SewingGuide"
 import { DownloadActions } from "@/components/DownloadActions"
@@ -438,6 +439,14 @@ export default function GeneratePage() {
                       {generateError}
                     </p>
                   )}
+                  {(() => {
+                    const activePattern =
+                      patternBySize[useCustom ? "Personnalisé" : selectedSizes[0]] ??
+                      Object.values(patternBySize)[0]
+                    return activePattern ? (
+                      <CuttingLayout pieces={activePattern.pieces} />
+                    ) : null
+                  })()}
                   <button
                     onClick={() => setStep(analysis?.type === "pants" ? 6 : 5)}
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
