@@ -62,6 +62,7 @@ export function Mannequin3D({
   const [clearToken, setClearToken] = useState(0)
   const [furEnabled, setFurEnabled] = useState(false)
   const [furPreset, setFurPreset] = useState("moyenne")
+  const [mode, setMode] = useState<"clean" | "sim">("clean")
   const [lastInitial, setLastInitial] = useState<SizeMeasurements>(initialMeasurements)
 
   // Reset preview lorsque les mesures source changent (passage entrant ou
@@ -108,8 +109,33 @@ export function Mannequin3D({
         clearToken={clearToken}
         furEnabled={furEnabled}
         furPreset={furPreset}
+        mode={mode}
       />
 
+      {/* Mode de rendu */}
+      <div className="flex bg-gray-100 rounded-xl p-1 w-fit mx-auto">
+        <button
+          onClick={() => setMode("clean")}
+          className={cn(
+            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+            mode === "clean" ? "bg-white text-purple-700 shadow-sm" : "text-gray-600 hover:text-gray-800",
+          )}
+        >
+          Aperçu propre
+        </button>
+        <button
+          onClick={() => setMode("sim")}
+          className={cn(
+            "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+            mode === "sim" ? "bg-white text-purple-700 shadow-sm" : "text-gray-600 hover:text-gray-800",
+          )}
+        >
+          Simulation tissu (exp.)
+        </button>
+      </div>
+
+      {mode === "sim" && (
+        <>
       {/* Toggle simulation */}
       <div className="flex items-center justify-between">
         <div className="text-xs text-gray-500">
@@ -187,6 +213,8 @@ export function Mannequin3D({
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* Fourrure */}
       <div className="space-y-3 rounded-xl border border-purple-100 bg-purple-50/40 p-4">

@@ -19,51 +19,10 @@ import {
 import { Cloth } from "@/lib/3d/cloth"
 import { buildClothForPiece } from "@/lib/3d/cloth-pieces"
 import { FABRICS, type FabricKey } from "@/lib/3d/fabrics"
-import { FUR_VERTEX_SHADER, FUR_FRAGMENT_SHADER, furPresetById } from "@/lib/3d/fur"
+import { DressedMannequin, FurShells } from "./DressedMannequin"
 
 const CM_TO_M = 0.01
 const SKIN_COLOR = "#e8c5a0"
-const FUR_LIGHT_DIR = new THREE.Vector3(0.4, 0.7, 0.6)
-
-// Coques de fourrure empilées sur une géométrie (shell rendering).
-function FurShells({
-  geometry,
-  color,
-  preset,
-}: {
-  geometry: THREE.BufferGeometry
-  color: string
-  preset: string
-}) {
-  const p = furPresetById(preset)
-  const materials = useMemo(() => {
-    return Array.from({ length: p.shells }, (_, i) => {
-      const layer = (i + 1) / p.shells // coque 0 = mesh de base existant → on commence à 1
-      return new THREE.ShaderMaterial({
-        uniforms: {
-          uOffset: { value: layer * p.lengthM },
-          uColor: { value: new THREE.Color(color) },
-          uLayer: { value: layer },
-          uDensity: { value: p.density },
-          uLightDir: { value: FUR_LIGHT_DIR },
-        },
-        vertexShader: FUR_VERTEX_SHADER,
-        fragmentShader: FUR_FRAGMENT_SHADER,
-        side: THREE.DoubleSide,
-      })
-    })
-  }, [color, p.shells, p.lengthM, p.density])
-
-  useEffect(() => () => materials.forEach((m) => m.dispose()), [materials])
-
-  return (
-    <>
-      {materials.map((m, k) => (
-        <mesh key={k} geometry={geometry} material={m} />
-      ))}
-    </>
-  )
-}
 
 const circToRadius = (circCm: number): number => (circCm / (2 * Math.PI)) * CM_TO_M
 
@@ -285,6 +244,7 @@ interface MannequinSceneProps {
   clearToken?: number
   furEnabled?: boolean
   furPreset?: string
+  mode?: "clean" | "sim"
 }
 
 export function MannequinScene({
@@ -297,6 +257,7 @@ export function MannequinScene({
   clearToken = 0,
   furEnabled = false,
   furPreset = "moyenne",
+  mode = "clean",
 }: MannequinSceneProps) {
   return (
     <div className="relative w-full aspect-square rounded-xl bg-gradient-to-b from-purple-50 to-gray-100 overflow-hidden border border-gray-200">
@@ -315,17 +276,27 @@ export function MannequinScene({
         />
         <directionalLight position={[-2, 1, -1]} intensity={0.35} />
 
-        <Mannequin
-          measurements={measurements}
-          fabric={fabric}
-          simEnabled={simEnabled}
-          garmentType={garmentType}
-          pinchMode={pinchMode}
-          pinchHeight={pinchHeight}
-          clearToken={clearToken}
-          furEnabled={furEnabled}
-          furPreset={furPreset}
-        />
+        {mode === "sim" ? (
+          <Mannequin
+            measurements={measurements}
+            fabric={fabric}
+            simEnabled={simEnabled}
+            garmentType={garmentType}
+            pinchMode={pinchMode}
+            pinchHeight={pinchHeight}
+            clearToken={clearToken}
+            furEnabled={furEnabled}
+            furPreset={furPreset}
+          />
+        ) : (
+          <DressedMannequin
+            measurements={measurements}
+            fabric={fabric}
+            garmentType={garmentType}
+            furEnabled={furEnabled}
+            furPreset={furPreset}
+          />
+        )}
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]} receiveShadow>
           <circleGeometry args={[1.2, 48]} />
