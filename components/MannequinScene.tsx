@@ -19,9 +19,51 @@ import {
 import { Cloth } from "@/lib/3d/cloth"
 import { buildClothForPiece } from "@/lib/3d/cloth-pieces"
 import { FABRICS, type FabricKey } from "@/lib/3d/fabrics"
+import { FUR_VERTEX_SHADER, FUR_FRAGMENT_SHADER, furPresetById } from "@/lib/3d/fur"
 
 const CM_TO_M = 0.01
 const SKIN_COLOR = "#e8c5a0"
+const FUR_LIGHT_DIR = new THREE.Vector3(0.4, 0.7, 0.6)
+
+// Coques de fourrure empilées sur une géométrie (shell rendering).
+function FurShells({
+  geometry,
+  color,
+  preset,
+}: {
+  geometry: THREE.BufferGeometry
+  color: string
+  preset: string
+}) {
+  const p = furPresetById(preset)
+  const materials = useMemo(() => {
+    return Array.from({ length: p.shells }, (_, i) => {
+      const layer = (i + 1) / p.shells // coque 0 = mesh de base existant → on commence à 1
+      return new THREE.ShaderMaterial({
+        uniforms: {
+          uOffset: { value: layer * p.lengthM },
+          uColor: { value: new THREE.Color(color) },
+          uLayer: { value: layer },
+          uDensity: { value: p.density },
+          uLightDir: { value: FUR_LIGHT_DIR },
+        },
+        vertexShader: FUR_VERTEX_SHADER,
+        fragmentShader: FUR_FRAGMENT_SHADER,
+        side: THREE.DoubleSide,
+      })
+    })
+  }, [color, p.shells, p.lengthM, p.density])
+
+  useEffect(() => () => materials.forEach((m) => m.dispose()), [materials])
+
+  return (
+    <>
+      {materials.map((m, k) => (
+        <mesh key={k} geometry={geometry} material={m} />
+      ))}
+    </>
+  )
+}
 
 const circToRadius = (circCm: number): number => (circCm / (2 * Math.PI)) * CM_TO_M
 
@@ -30,13 +72,29 @@ interface MannequinProps {
   fabric: FabricKey
   simEnabled: boolean
   garmentType: GarmentType
+  pinchMode: boolean
+  pinchHeight: number
+  clearToken: number
+  furEnabled: boolean
+  furPreset: string
 }
 
-function Mannequin({ measurements, fabric, simEnabled, garmentType }: MannequinProps) {
+function Mannequin({
+  measurements,
+  fabric,
+  simEnabled,
+  garmentType,
+  pinchMode,
+  pinchHeight,
+  clearToken,
+  furEnabled,
+  furPreset,
+}: MannequinProps) {
   const groupRef = useRef<THREE.Group>(null)
 
   useFrame((_state, delta) => {
-    if (groupRef.current) {
+    // Rotation auto en pause pendant le pinçage pour viser sans que le tissu tourne.
+    if (groupRef.current && !pinchMode) {
       groupRef.current.rotation.y += delta * 0.15
     }
   })
@@ -122,6 +180,11 @@ function Mannequin({ measurements, fabric, simEnabled, garmentType }: MannequinP
     }
   }, [sim.meshes])
 
+  // Relâche tous les plis quand le bouton "Relâcher les plis" est cliqué.
+  useEffect(() => {
+    if (clearToken > 0) sim.cloths.forEach((c) => c.clearPinches())
+  }, [clearToken, sim.cloths])
+
   useEffect(() => {
     const geo = body.bodyGeometry
     return () => {
@@ -176,8 +239,18 @@ function Mannequin({ measurements, fabric, simEnabled, garmentType }: MannequinP
       ))}
 
       {/* ── Vêtement : meshs triangulés + simulation ── */}
-      {sim.meshes.map((piece) => (
-        <mesh key={piece.name} geometry={piece.geometry} castShadow>
+      {sim.meshes.map((piece, idx) => (
+        <mesh
+          key={piece.name}
+          geometry={piece.geometry}
+          castShadow
+          onPointerDown={(e) => {
+            if (!pinchMode) return
+            e.stopPropagation()
+            const vi = e.face?.a
+            if (vi != null) sim.cloths[idx]?.togglePinch(vi, pinchHeight)
+          }}
+        >
           <meshStandardMaterial
             color={fabricProps.color}
             side={THREE.DoubleSide}
@@ -187,6 +260,17 @@ function Mannequin({ measurements, fabric, simEnabled, garmentType }: MannequinP
           />
         </mesh>
       ))}
+
+      {/* ── Fourrure (coques) ── */}
+      {furEnabled &&
+        sim.meshes.map((piece) => (
+          <FurShells
+            key={`fur-${piece.name}`}
+            geometry={piece.geometry}
+            color={fabricProps.color}
+            preset={furPreset}
+          />
+        ))}
     </group>
   )
 }
@@ -196,6 +280,11 @@ interface MannequinSceneProps {
   fabric: FabricKey
   simEnabled?: boolean
   garmentType?: GarmentType
+  pinchMode?: boolean
+  pinchHeight?: number
+  clearToken?: number
+  furEnabled?: boolean
+  furPreset?: string
 }
 
 export function MannequinScene({
@@ -203,6 +292,11 @@ export function MannequinScene({
   fabric,
   simEnabled = true,
   garmentType = "tshirt",
+  pinchMode = false,
+  pinchHeight = 0.03,
+  clearToken = 0,
+  furEnabled = false,
+  furPreset = "moyenne",
 }: MannequinSceneProps) {
   return (
     <div className="relative w-full aspect-square rounded-xl bg-gradient-to-b from-purple-50 to-gray-100 overflow-hidden border border-gray-200">
@@ -226,6 +320,11 @@ export function MannequinScene({
           fabric={fabric}
           simEnabled={simEnabled}
           garmentType={garmentType}
+          pinchMode={pinchMode}
+          pinchHeight={pinchHeight}
+          clearToken={clearToken}
+          furEnabled={furEnabled}
+          furPreset={furPreset}
         />
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]} receiveShadow>

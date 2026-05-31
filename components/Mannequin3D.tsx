@@ -9,6 +9,7 @@ import { Loader2, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MORPH_PRESETS, MEASUREMENT_BOUNDS } from "@/lib/3d/presets"
 import { FABRICS, FABRIC_ORDER, type FabricKey } from "@/lib/3d/fabrics"
+import { FUR_PRESETS } from "@/lib/3d/fur"
 import type { SizeMeasurements } from "@/lib/types/pattern"
 import type { GarmentType } from "@/lib/patterns/index"
 
@@ -56,6 +57,11 @@ export function Mannequin3D({
   const [activePreset, setActivePreset] = useState<string | null>(null)
   const [fabric, setFabric] = useState<FabricKey>("jersey")
   const [simEnabled, setSimEnabled] = useState(true)
+  const [pinchMode, setPinchMode] = useState(false)
+  const [pinchHeight, setPinchHeight] = useState(0.03)
+  const [clearToken, setClearToken] = useState(0)
+  const [furEnabled, setFurEnabled] = useState(false)
+  const [furPreset, setFurPreset] = useState("moyenne")
   const [lastInitial, setLastInitial] = useState<SizeMeasurements>(initialMeasurements)
 
   // Reset preview lorsque les mesures source changent (passage entrant ou
@@ -97,6 +103,11 @@ export function Mannequin3D({
         fabric={fabric}
         simEnabled={simEnabled}
         garmentType={garmentType}
+        pinchMode={pinchMode}
+        pinchHeight={pinchHeight}
+        clearToken={clearToken}
+        furEnabled={furEnabled}
+        furPreset={furPreset}
       />
 
       {/* Toggle simulation */}
@@ -118,6 +129,105 @@ export function Mannequin3D({
         >
           {simEnabled ? "Active" : "Inactive"}
         </button>
+      </div>
+
+      {/* Pinçage avancé */}
+      <div className="space-y-3 rounded-xl border border-purple-100 bg-purple-50/40 p-4">
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-gray-500">
+            <span className="font-medium text-gray-700">Pinçage avancé : </span>
+            {pinchMode
+              ? "clique sur le tissu pour créer un pli (re-clique pour l'enlever)"
+              : "tire le tissu pour créer des froissements et des reliefs"}
+          </div>
+          <button
+            onClick={() => {
+              setPinchMode((v) => {
+                const next = !v
+                if (next) setSimEnabled(true) // les plis nécessitent la simulation
+                return next
+              })
+            }}
+            className={cn(
+              "px-3 py-1 text-xs font-medium rounded-full border transition-colors flex-shrink-0",
+              pinchMode
+                ? "bg-purple-600 border-purple-600 text-white"
+                : "border-gray-300 text-gray-600 hover:border-purple-300",
+            )}
+          >
+            {pinchMode ? "Activé" : "Désactivé"}
+          </button>
+        </div>
+
+        {pinchMode && (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-gray-600">
+                <span>Intensité du pli</span>
+                <span className="font-semibold text-purple-600 tabular-nums">
+                  {Math.round(pinchHeight * 100)} cm
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.01}
+                max={0.08}
+                step={0.005}
+                value={pinchHeight}
+                onChange={(e) => setPinchHeight(parseFloat(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+              />
+            </div>
+            <button
+              onClick={() => setClearToken((t) => t + 1)}
+              className="w-full border border-gray-300 hover:border-purple-300 text-gray-600 hover:text-purple-700 font-medium py-2 px-4 rounded-lg transition-colors text-sm"
+            >
+              Relâcher tous les plis
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Fourrure */}
+      <div className="space-y-3 rounded-xl border border-purple-100 bg-purple-50/40 p-4">
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-gray-500">
+            <span className="font-medium text-gray-700">Fourrure : </span>
+            {furEnabled
+              ? "rendu temps réel par coques"
+              : "visualise un rendu fourrure sur le vêtement"}
+          </div>
+          <button
+            onClick={() => setFurEnabled((v) => !v)}
+            className={cn(
+              "px-3 py-1 text-xs font-medium rounded-full border transition-colors flex-shrink-0",
+              furEnabled
+                ? "bg-purple-600 border-purple-600 text-white"
+                : "border-gray-300 text-gray-600 hover:border-purple-300",
+            )}
+          >
+            {furEnabled ? "Activée" : "Désactivée"}
+          </button>
+        </div>
+
+        {furEnabled && (
+          <div className="grid grid-cols-3 gap-2">
+            {FUR_PRESETS.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFurPreset(f.id)}
+                className={cn(
+                  "rounded-lg border-2 py-2 px-1 text-xs font-medium transition-colors",
+                  furPreset === f.id
+                    ? "border-purple-400 bg-purple-50 text-purple-700"
+                    : "border-gray-200 text-gray-600 hover:border-purple-200",
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Sélecteur de tissu */}

@@ -41,7 +41,9 @@ export class Cloth {
   readonly positions: Float32Array
   private prev: Float32Array
   private readonly pinned: Uint8Array
+  private readonly originalPinned: Uint8Array      // épingles structurelles (jamais retirées par le pinçage)
   private readonly pinPositions: Float32Array  // positions de référence des vertices épinglés
+  private readonly pinches = new Set<number>() // pincements utilisateur actifs
   private readonly pairsI: Int32Array
   private readonly pairsJ: Int32Array
   private readonly rest: Float32Array
@@ -59,11 +61,63 @@ export class Cloth {
     this.positions = initialPositions.slice()
     this.prev = initialPositions.slice()
     this.pinned = pinned
+    this.originalPinned = pinned.slice()
     this.pinPositions = initialPositions.slice()
     this.pairsI = new Int32Array(pairsI)
     this.pairsJ = new Int32Array(pairsJ)
     this.rest = new Float32Array(rest)
     this.collision = collision
+  }
+
+  /**
+   * Pincement avancé : épingle (ou relâche) un vertex en le tirant vers
+   * l'extérieur du corps, comme si on pinçait le tissu entre deux doigts. Les
+   * vertices voisins suivent via les contraintes de distance → un pli/relief se
+   * forme autour du point. Les épingles structurelles ne sont jamais affectées.
+   * @returns true si pincé, false si relâché, null si ignoré.
+   */
+  togglePinch(i: number, height: number): boolean | null {
+    if (i < 0 || i >= this.n || this.originalPinned[i]) return null
+    const i3 = i * 3
+    if (this.pinches.has(i)) {
+      this.pinches.delete(i)
+      this.pinned[i] = 0
+      return false
+    }
+    const x = this.positions[i3]
+    const y = this.positions[i3 + 1]
+    const z = this.positions[i3 + 2]
+    let dx = x
+    let dz = z
+    const len = Math.hypot(dx, dz)
+    if (len > 1e-4) {
+      dx /= len
+      dz /= len
+    } else {
+      dx = 0
+      dz = 1
+    }
+    const tx = x + dx * height
+    const tz = z + dz * height
+    this.pinned[i] = 1
+    this.pinPositions[i3] = tx
+    this.pinPositions[i3 + 1] = y
+    this.pinPositions[i3 + 2] = tz
+    this.positions[i3] = tx
+    this.positions[i3 + 2] = tz
+    this.prev[i3] = tx
+    this.prev[i3 + 2] = tz
+    this.pinches.add(i)
+    return true
+  }
+
+  clearPinches(): void {
+    for (const i of this.pinches) this.pinned[i] = 0
+    this.pinches.clear()
+  }
+
+  get pinchCount(): number {
+    return this.pinches.size
   }
 
   step(dt: number, p: ClothParams): void {
@@ -229,5 +283,7 @@ export class Cloth {
     this.positions.set(positions)
     this.prev.set(positions)
     this.pinPositions.set(positions)
+    for (const i of this.pinches) this.pinned[i] = 0
+    this.pinches.clear()
   }
 }
