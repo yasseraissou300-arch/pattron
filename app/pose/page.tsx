@@ -11,6 +11,7 @@ import { Loader2, Sparkles, RotateCcw, ChevronLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { EU_SIZES, EU_SIZE_ORDER } from "@/lib/sizes"
 import { POSE_PRESETS, NEUTRAL_POSE, type Pose } from "@/lib/3d/poses"
+import { HIP_PRESETS, NEUTRAL_HIPS, HIP_RANGES, type HipShape } from "@/lib/3d/hips"
 import type { EuSize } from "@/lib/types/pattern"
 
 const PoseCanvas = dynamic(
@@ -40,6 +41,8 @@ export default function PosePage() {
   const [size, setSize] = useState<EuSize>("M")
   const [pose, setPose] = useState<Pose>(NEUTRAL_POSE)
   const [activePreset, setActivePreset] = useState<string | null>("neutre")
+  const [hips, setHips] = useState<HipShape>(NEUTRAL_HIPS)
+  const [activeHipPreset, setActiveHipPreset] = useState<string | null>("neutre")
   const [prompt, setPrompt] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,6 +53,16 @@ export default function PosePage() {
     setPose(p)
     setActivePreset(id)
     setError(null)
+  }
+
+  const applyHipPreset = (id: string, s: HipShape) => {
+    setHips(s)
+    setActiveHipPreset(id)
+  }
+
+  const setHipParam = (k: keyof HipShape, v: number) => {
+    setHips((h) => ({ ...h, [k]: v }))
+    setActiveHipPreset(null)
   }
 
   const generate = async () => {
@@ -114,7 +127,7 @@ export default function PosePage() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
           {/* Avatar 3D */}
-          <PoseCanvas pose={pose} measurements={measurements} />
+          <PoseCanvas pose={pose} measurements={measurements} hips={hips} />
 
           {/* Morphologie */}
           <div className="space-y-2">
@@ -136,6 +149,55 @@ export default function PosePage() {
                   {s}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Forme des hanches */}
+          <div className="space-y-3">
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Forme des hanches
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {HIP_PRESETS.map((h) => (
+                <button
+                  key={h.id}
+                  onClick={() => applyHipPreset(h.id, h.shape)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full border text-xs font-medium transition-colors",
+                    activeHipPreset === h.id
+                      ? "bg-purple-600 border-purple-600 text-white"
+                      : "border-gray-300 text-gray-600 hover:border-purple-300 hover:text-purple-600",
+                  )}
+                >
+                  <span className="mr-1">{h.emoji}</span>
+                  {h.label}
+                </button>
+              ))}
+            </div>
+            <div className="grid sm:grid-cols-3 gap-4">
+              {(
+                [
+                  { key: "width", label: "Largeur" },
+                  { key: "seat", label: "Volume du bas" },
+                  { key: "roundness", label: "Arrondi" },
+                ] as { key: keyof HipShape; label: string }[]
+              ).map((f) => {
+                const r = HIP_RANGES[f.key]
+                return (
+                  <div key={f.key} className="space-y-1">
+                    <label className="text-sm text-gray-700">{f.label}</label>
+                    <input
+                      type="range"
+                      min={r.min}
+                      max={r.max}
+                      step={r.step}
+                      value={hips[f.key]}
+                      onChange={(e) => setHipParam(f.key, parseFloat(e.target.value))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                    />
+                  </div>
+                )
+              })}
             </div>
           </div>
 

@@ -10,12 +10,13 @@
 // Limite assumée : ce mannequin n'porte pas le vêtement (le pipeline de drapé
 // est cylindrique et ne suit pas les membres). C'est un aperçu d'avatar.
 
-import { useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { Canvas, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
 import * as THREE from "three"
 import type { SizeMeasurements } from "@/lib/types/pattern"
 import { NEUTRAL_POSE, type Pose } from "@/lib/3d/poses"
+import { bodyProfile, NEUTRAL_HIPS, type HipShape } from "@/lib/3d/hips"
 
 const CM_TO_M = 0.01
 const SKIN_COLOR = "#e8c5a0"
@@ -72,8 +73,33 @@ function Joint({ r }: { r: number }) {
 
 // ─── Le rig ───────────────────────────────────────────────────────────────────
 
-function Rig({ pose, measurements }: { pose: Pose; measurements: SizeMeasurements }) {
+function Rig({
+  pose,
+  measurements,
+  hips,
+}: {
+  pose: Pose
+  measurements: SizeMeasurements
+  hips: HipShape
+}) {
   const P = useProportions(measurements)
+
+  // Corps de révolution (torse + hanches) piloté par la forme des hanches.
+  const torsoGeo = useMemo(
+    () =>
+      new THREE.LatheGeometry(
+        bodyProfile(measurements, hips).map(([r, y]) => new THREE.Vector2(r, y)),
+        48,
+      ),
+    [measurements, hips],
+  )
+  useEffect(() => () => torsoGeo.dispose(), [torsoGeo])
+
+  // Écartement des jambes sous les hanches (suit la largeur de hanches).
+  const legHipX = Math.max(
+    0.07,
+    (measurements.hanches / (2 * Math.PI)) * 0.01 * hips.width * 0.55,
+  )
 
   const torso = useRef<THREE.Group>(null)
   const neck = useRef<THREE.Group>(null)
@@ -112,19 +138,13 @@ function Rig({ pose, measurements }: { pose: Pose; measurements: SizeMeasurement
     lKnee.current?.rotation.set(cur.lKnee * DEG, 0, 0)
   })
 
-  const { torsoLen, shoulderHalf, hipHalf, neckLen, headR, uArm, fArm, thigh, shin, limbR } = P
+  const { torsoLen, shoulderHalf, neckLen, headR, uArm, fArm, thigh, shin, limbR } = P
 
   return (
     // Pelvis à l'origine ; jambes vers le bas, torse vers le haut.
     <group>
-      {/* ── Bassin ── */}
-      <mesh position={[0, 0, 0]} castShadow>
-        <sphereGeometry args={[hipHalf * 1.25, 20, 16]} />
-        <meshStandardMaterial color={SKIN_COLOR} roughness={0.7} metalness={0.05} />
-      </mesh>
-
       {/* ── Jambe droite ── */}
-      <group ref={rHip} position={[hipHalf, 0, 0]}>
+      <group ref={rHip} position={[legHipX, 0, 0]}>
         <Joint r={limbR * 1.1} />
         <Bone len={thigh} rTop={limbR * 1.15} rBot={limbR} />
         <group ref={rKnee} position={[0, -thigh, 0]}>
@@ -138,7 +158,7 @@ function Rig({ pose, measurements }: { pose: Pose; measurements: SizeMeasurement
       </group>
 
       {/* ── Jambe gauche ── */}
-      <group ref={lHip} position={[-hipHalf, 0, 0]}>
+      <group ref={lHip} position={[-legHipX, 0, 0]}>
         <Joint r={limbR * 1.1} />
         <Bone len={thigh} rTop={limbR * 1.15} rBot={limbR} />
         <group ref={lKnee} position={[0, -thigh, 0]}>
@@ -151,10 +171,9 @@ function Rig({ pose, measurements }: { pose: Pose; measurements: SizeMeasurement
         </group>
       </group>
 
-      {/* ── Torse (pivot au bassin) ── */}
+      {/* ── Torse + hanches (corps de révolution, pivot au bassin) ── */}
       <group ref={torso} position={[0, 0, 0]}>
-        <mesh position={[0, torsoLen * 0.5, 0]} castShadow>
-          <cylinderGeometry args={[shoulderHalf * 0.92, hipHalf * 1.1, torsoLen, 24]} />
+        <mesh geometry={torsoGeo} castShadow receiveShadow>
           <meshStandardMaterial color={SKIN_COLOR} roughness={0.7} metalness={0.05} />
         </mesh>
 
@@ -210,9 +229,10 @@ function Rig({ pose, measurements }: { pose: Pose; measurements: SizeMeasurement
 interface PoseCanvasProps {
   pose: Pose
   measurements: SizeMeasurements
+  hips?: HipShape
 }
 
-export function PoseCanvas({ pose, measurements }: PoseCanvasProps) {
+export function PoseCanvas({ pose, measurements, hips = NEUTRAL_HIPS }: PoseCanvasProps) {
   const groundY = -(measurements.longueurDos * CM_TO_M * 1.65 + 0.05)
 
   return (
@@ -232,7 +252,7 @@ export function PoseCanvas({ pose, measurements }: PoseCanvasProps) {
         />
         <directionalLight position={[-2, 1, -1]} intensity={0.35} />
 
-        <Rig pose={pose} measurements={measurements} />
+        <Rig pose={pose} measurements={measurements} hips={hips} />
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, groundY, 0]} receiveShadow>
           <circleGeometry args={[1.3, 48]} />
