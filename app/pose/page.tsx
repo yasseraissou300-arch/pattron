@@ -7,7 +7,7 @@
 import { useState } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
-import { Loader2, Sparkles, RotateCcw, ChevronLeft } from "lucide-react"
+import { Loader2, Sparkles, RotateCcw, ChevronLeft, Play, Pause, Plus, Trash2, Film } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { EU_SIZES, EU_SIZE_ORDER } from "@/lib/sizes"
 import { POSE_PRESETS, NEUTRAL_POSE, type Pose } from "@/lib/3d/poses"
@@ -43,6 +43,13 @@ export default function PosePage() {
   const [activePreset, setActivePreset] = useState<string | null>("neutre")
   const [hips, setHips] = useState<HipShape>(NEUTRAL_HIPS)
   const [activeHipPreset, setActiveHipPreset] = useState<string | null>("neutre")
+
+  // Animation par image clé
+  const [frames, setFrames] = useState<Pose[]>([])
+  const [playing, setPlaying] = useState(false)
+  const [loop, setLoop] = useState(true)
+  const [durationSec, setDurationSec] = useState(4)
+  const [scrub, setScrub] = useState(0)
   const [prompt, setPrompt] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -127,7 +134,12 @@ export default function PosePage() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
           {/* Avatar 3D */}
-          <PoseCanvas pose={pose} measurements={measurements} hips={hips} />
+          <PoseCanvas
+            pose={pose}
+            measurements={measurements}
+            hips={hips}
+            clip={{ frames, playing, loop, durationSec, scrub }}
+          />
 
           {/* Morphologie */}
           <div className="space-y-2">
@@ -277,6 +289,117 @@ export default function PosePage() {
               <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
                 {error}
               </p>
+            )}
+          </div>
+
+          {/* Animation par image clé */}
+          <div className="space-y-3 rounded-xl border border-purple-100 bg-purple-50/40 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Film className="w-4 h-4 text-purple-600" />
+                <h3 className="text-sm font-semibold text-gray-900">Animation (images clés)</h3>
+              </div>
+              {frames.length > 0 && (
+                <button
+                  onClick={() => {
+                    setFrames([])
+                    setPlaying(false)
+                  }}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-600 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Tout effacer
+                </button>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Pose l'avatar (preset, IA, hanches…), capture une image clé, recommence,
+              puis lance la lecture : les poses s'enchaînent en fondu.
+            </p>
+
+            <button
+              onClick={() => setFrames((f) => [...f, pose])}
+              className="w-full flex items-center justify-center gap-2 border-2 border-purple-300 text-purple-700 hover:bg-purple-50 font-medium py-2 px-4 rounded-lg transition-colors text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Capturer cette pose comme image clé
+            </button>
+
+            {frames.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {frames.map((_, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 bg-white border border-purple-200 rounded-full pl-2.5 pr-1 py-1 text-xs text-gray-700"
+                  >
+                    Image {i + 1}
+                    <button
+                      onClick={() => setFrames((f) => f.filter((_, idx) => idx !== i))}
+                      className="w-4 h-4 rounded-full hover:bg-red-100 text-gray-400 hover:text-red-600 flex items-center justify-center"
+                      aria-label={`Supprimer l'image ${i + 1}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {frames.length >= 2 && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPlaying((p) => !p)}
+                    className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm"
+                  >
+                    {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                    {playing ? "Pause" : "Lecture"}
+                  </button>
+                  <button
+                    onClick={() => setLoop((l) => !l)}
+                    className={cn(
+                      "px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
+                      loop
+                        ? "bg-purple-600 border-purple-600 text-white"
+                        : "border-gray-300 text-gray-600 hover:border-purple-300",
+                    )}
+                  >
+                    Boucle
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-gray-600">
+                    <span>Durée</span>
+                    <span className="font-semibold text-purple-600 tabular-nums">{durationSec}s</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={12}
+                    step={0.5}
+                    value={durationSec}
+                    onChange={(e) => setDurationSec(parseFloat(e.target.value))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                  />
+                </div>
+
+                {!playing && (
+                  <div className="space-y-1">
+                    <div className="text-xs text-gray-600">Position</div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={scrub}
+                      onChange={(e) => setScrub(parseFloat(e.target.value))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                    />
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

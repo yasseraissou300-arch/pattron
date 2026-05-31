@@ -15,7 +15,7 @@ import { Canvas, useFrame } from "@react-three/fiber"
 import { OrbitControls } from "@react-three/drei"
 import * as THREE from "three"
 import type { SizeMeasurements } from "@/lib/types/pattern"
-import { NEUTRAL_POSE, type Pose } from "@/lib/3d/poses"
+import { NEUTRAL_POSE, sampleFrames, type Pose, type PoseClip } from "@/lib/3d/poses"
 import { bodyProfile, NEUTRAL_HIPS, type HipShape } from "@/lib/3d/hips"
 
 const CM_TO_M = 0.01
@@ -77,10 +77,12 @@ function Rig({
   pose,
   measurements,
   hips,
+  clip,
 }: {
   pose: Pose
   measurements: SizeMeasurements
   hips: HipShape
+  clip?: PoseClip
 }) {
   const P = useProportions(measurements)
 
@@ -114,12 +116,38 @@ function Rig({
 
   // Pose courante (mutable) lissée vers la pose cible à chaque frame.
   const current = useRef<Pose>({ ...NEUTRAL_POSE })
+  const clock = useRef(0)
+  const wasPlaying = useRef(false)
 
   useFrame((_s, delta) => {
     const cur = current.current
-    const k = 1 - Math.pow(0.001, Math.min(delta, 0.05)) // lissage exponentiel
-    for (const key of Object.keys(cur) as (keyof Pose)[]) {
-      cur[key] += (pose[key] - cur[key]) * k
+
+    // Pose cible : l'animation (clip) est prioritaire sur la pose statique.
+    let target = pose
+    let playing = false
+    if (clip && clip.frames.length > 0) {
+      if (clip.playing) {
+        if (!wasPlaying.current) clock.current = 0
+        clock.current += delta
+        let u = clip.durationSec > 0 ? clock.current / clip.durationSec : 1
+        u = clip.loop ? u % 1 : Math.min(u, 1)
+        target = sampleFrames(clip.frames, u) ?? pose
+        playing = true
+      } else {
+        target = sampleFrames(clip.frames, clip.scrub) ?? pose
+      }
+    }
+    wasPlaying.current = playing
+
+    if (playing) {
+      // Lecture nette : suit directement l'échantillon interpolé.
+      for (const key of Object.keys(cur) as (keyof Pose)[]) cur[key] = target[key]
+    } else {
+      // Transition douce vers la cible (presets / IA / scrub).
+      const k = 1 - Math.pow(0.001, Math.min(delta, 0.05))
+      for (const key of Object.keys(cur) as (keyof Pose)[]) {
+        cur[key] += (target[key] - cur[key]) * k
+      }
     }
 
     torso.current?.rotation.set(cur.torsoTilt * DEG, cur.torsoTurn * DEG, cur.torsoSide * DEG)
@@ -230,9 +258,10 @@ interface PoseCanvasProps {
   pose: Pose
   measurements: SizeMeasurements
   hips?: HipShape
+  clip?: PoseClip
 }
 
-export function PoseCanvas({ pose, measurements, hips = NEUTRAL_HIPS }: PoseCanvasProps) {
+export function PoseCanvas({ pose, measurements, hips = NEUTRAL_HIPS, clip }: PoseCanvasProps) {
   const groundY = -(measurements.longueurDos * CM_TO_M * 1.65 + 0.05)
 
   return (
@@ -252,7 +281,7 @@ export function PoseCanvas({ pose, measurements, hips = NEUTRAL_HIPS }: PoseCanv
         />
         <directionalLight position={[-2, 1, -1]} intensity={0.35} />
 
-        <Rig pose={pose} measurements={measurements} hips={hips} />
+        <Rig pose={pose} measurements={measurements} hips={hips} clip={clip} />
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, groundY, 0]} receiveShadow>
           <circleGeometry args={[1.3, 48]} />

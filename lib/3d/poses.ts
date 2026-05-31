@@ -208,3 +208,36 @@ export const POSE_PRESETS: PosePreset[] = [
 export function presetById(id: string): PosePreset | undefined {
   return POSE_PRESETS.find((p) => p.id === id)
 }
+
+// ─── Animation par image clé ──────────────────────────────────────────────────
+
+/** Interpolation linéaire articulation par articulation entre deux poses. */
+export function lerpPose(a: Pose, b: Pose, t: number): Pose {
+  const out = {} as Pose
+  for (const id of JOINT_IDS) {
+    out[id] = a[id] + (b[id] - a[id]) * t
+  }
+  return out
+}
+
+/**
+ * Échantillonne une suite d'images clés (réparties uniformément sur [0,1])
+ * à la position u ∈ [0,1]. Renvoie null si aucune image clé.
+ */
+export function sampleFrames(frames: Pose[], u: number): Pose | null {
+  if (frames.length === 0) return null
+  if (frames.length === 1) return frames[0]
+  const clamped = Math.min(1, Math.max(0, u))
+  const pos = clamped * (frames.length - 1)
+  const i = Math.floor(pos)
+  if (i >= frames.length - 1) return frames[frames.length - 1]
+  return lerpPose(frames[i], frames[i + 1], pos - i)
+}
+
+export interface PoseClip {
+  frames: Pose[]
+  playing: boolean
+  loop: boolean
+  durationSec: number
+  scrub: number // position 0..1 quand en pause
+}
