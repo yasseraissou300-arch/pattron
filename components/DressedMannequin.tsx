@@ -1,27 +1,30 @@
 "use client"
 
-// Aperçu 3D "propre" : un mannequin (corps de révolution) habillé d'un vêtement
-// représenté par des SURFACES LISSES CONTINUES (lathes + cylindres). Contrairement
-// à la simulation Verlet (panneaux triangulés qui se déchirent et laissent des
-// trous), ces surfaces sont fermées par construction → jamais de trou. Le but est
-// de donner une idée fiable du tombé, de la longueur et de la couleur du tissu.
+// Aperçu 3D "propre" : mannequin habillé de SURFACES LISSES CONTINUES (lathes +
+// cylindres), donc sans trou possible (contrairement à la simulation Verlet qui
+// déchirait le tissu). Objectif : silhouette crédible + tombé/longueur/couleur.
+//
+// Choix clés pour un rendu humain (et non "vase de révolution") :
+//  - section ELLIPTIQUE : on écrase la profondeur (axe Z) → plus large que profond.
+//  - vraies ÉPAULES dans le profil du corps → les bras s'y rattachent.
+//  - figure mise à l'échelle + centrée pour tenir entièrement dans le cadre.
 
 import { useMemo, useEffect } from "react"
 import * as THREE from "three"
 import type { SizeMeasurements } from "@/lib/types/pattern"
 import type { GarmentType } from "@/lib/patterns/index"
-import { bodyProfile, NEUTRAL_HIPS, type HipShape } from "@/lib/3d/hips"
 import { FABRICS, type FabricKey } from "@/lib/3d/fabrics"
 import { FUR_VERTEX_SHADER, FUR_FRAGMENT_SHADER, furPresetById } from "@/lib/3d/fur"
 
 const CM_TO_M = 0.01
 const SKIN = "#e8c5a0"
+const DEPTH = 0.62 // écrasement de la profondeur → silhouette elliptique humaine
 const FUR_LIGHT_DIR = new THREE.Vector3(0.4, 0.7, 0.6)
 const radiusOf = (c: number) => (c / (2 * Math.PI)) * CM_TO_M
 
-function latheGeo(points: Array<[number, number]>, seg = 64): THREE.LatheGeometry {
+function latheGeo(points: Array<[number, number]>, seg = 56): THREE.LatheGeometry {
   return new THREE.LatheGeometry(
-    points.map(([r, y]) => new THREE.Vector2(Math.max(r, 0.001), y)),
+    points.map(([r, y]) => new THREE.Vector2(Math.max(r, 0.002), y)),
     seg,
   )
 }
@@ -64,102 +67,10 @@ export function FurShells({
   )
 }
 
-interface BuiltGarment {
-  // Surface principale en révolution (corps du vêtement / jupe / hanches pantalon)
-  main: THREE.BufferGeometry | null
-  // Tubes additionnels (manches, jambes) : géométrie + transform
-  tubes: Array<{ geo: THREE.BufferGeometry; pos: [number, number, number]; rotZ: number }>
-}
-
-function buildGarment(m: SizeMeasurements, type: GarmentType): BuiltGarment {
-  const torsoH = Math.max(0.35, m.longueurDos * CM_TO_M)
-  const rChest = radiusOf(m.poitrine)
-  const rWaist = radiusOf(m.taille)
-  const rHip = radiusOf(m.hanches)
-  const shoulderHalf = Math.max(0.12, (m.epaule * CM_TO_M) / 2)
-  const ease = 0.025
-  const rNeck = Math.max(0.05, rChest * 0.34)
-  const rCol = Math.max(rChest, rHip) + ease
-
-  const armAngle = 0.34 // A-pose
-  // Direction du bras (depuis l'épaule, vers le bas et l'extérieur).
-  const shoulderY = torsoH
-  const sleeveTube = (len: number, r: number, side: 1 | -1) => {
-    const geo = new THREE.CylinderGeometry(r * 0.85, r, len, 20, 1, true)
-    // Pivot épaule ; le tube part vers le bas (-Y) puis le groupe est incliné.
-    return {
-      geo,
-      pos: [side * shoulderHalf, shoulderY, 0] as [number, number, number],
-      rotZ: side * armAngle,
-      len,
-    }
-  }
-
-  const topProfile = (hemY: number, flare: number): Array<[number, number]> => [
-    [rCol * (1 + flare), hemY],
-    [rCol, 0],
-    [rCol * 0.99, torsoH * 0.55],
-    [rChest + ease * 0.7, torsoH * 0.82],
-    [rNeck, torsoH * 0.99],
-  ]
-
-  if (type === "tshirt" || type === "dress" || type === "shirt") {
-    const hemY = type === "dress" ? -0.5 : type === "shirt" ? -0.16 : -0.06
-    const flare = type === "dress" ? 0.12 : 0.04
-    const sleeveLen = type === "shirt" ? 0.42 : 0.16
-    const main = latheGeo(topProfile(hemY, flare))
-    const tubes: BuiltGarment["tubes"] = []
-    for (const side of [1, -1] as const) {
-      const s = sleeveTube(sleeveLen, 0.055 + ease, side)
-      // Place le tube le long de l'axe du bras (descend de la moitié de sa longueur).
-      tubes.push({
-        geo: s.geo,
-        pos: [
-          side * shoulderHalf - Math.sin(side * armAngle) * (sleeveLen / 2),
-          shoulderY - Math.cos(armAngle) * (sleeveLen / 2),
-          0,
-        ],
-        rotZ: side * armAngle,
-      })
-    }
-    return { main, tubes }
-  }
-
-  if (type === "skirt") {
-    const waistY = torsoH * 0.45
-    const main = latheGeo([
-      [rHip + 0.07, -0.45],
-      [rHip + 0.03, -0.05],
-      [rWaist + 0.02, waistY],
-    ])
-    return { main, tubes: [] }
-  }
-
-  // pants : section hanches + 2 jambes
-  const legLen = torsoH * 1.55
-  const rLeg = 0.085 + ease
-  const main = latheGeo([
-    [rHip + 0.02, -0.06],
-    [rHip + 0.02, 0],
-    [rWaist + 0.02, torsoH * 0.12],
-  ])
-  const tubes: BuiltGarment["tubes"] = []
-  for (const side of [1, -1] as const) {
-    const geo = new THREE.CylinderGeometry(rLeg * 0.7, rLeg, legLen, 20, 1, true)
-    tubes.push({
-      geo,
-      pos: [side * (rHip * 0.45), -0.06 - legLen / 2, 0],
-      rotZ: 0,
-    })
-  }
-  return { main, tubes }
-}
-
 interface DressedMannequinProps {
   measurements: SizeMeasurements
   fabric: FabricKey
   garmentType: GarmentType
-  hips?: HipShape
   furEnabled?: boolean
   furPreset?: string
 }
@@ -168,101 +79,163 @@ export function DressedMannequin({
   measurements,
   fabric,
   garmentType,
-  hips = NEUTRAL_HIPS,
   furEnabled = false,
   furPreset = "moyenne",
 }: DressedMannequinProps) {
   const m = measurements
-  const torsoH = Math.max(0.35, m.longueurDos * CM_TO_M)
-  const shoulderHalf = Math.max(0.12, (m.epaule * CM_TO_M) / 2)
-  const headR = 0.1
-  const neckLen = 0.07
-  const armLen = 0.5
-  const legLen = torsoH * 1.6
-  const armAngle = 0.34
 
-  const bodyGeo = useMemo(() => latheGeo(bodyProfile(m, hips)), [m, hips])
-  const garment = useMemo(() => buildGarment(m, garmentType), [m, garmentType])
+  // ── Mesures dérivées (mètres) ──
+  const dims = useMemo(() => {
+    const torsoH = Math.max(0.42, m.longueurDos * CM_TO_M)
+    const rHip = radiusOf(m.hanches)
+    const rWaist = radiusOf(m.taille)
+    const rChest = radiusOf(m.poitrine)
+    const shoulderHalf = Math.max(0.15, (m.epaule * CM_TO_M) / 2)
+    const rShoulder = shoulderHalf * 0.85
+    const shoulderH = torsoH * 0.98
+    const neckBaseR = Math.max(0.05, rChest * 0.34)
+    const headR = 0.092
+    const neckLen = 0.06
+    const armLen = torsoH * 0.92
+    const legLen = torsoH * 1.5
+    const ease = 0.022
+    const kind: "top" | "skirt" | "pants" =
+      garmentType === "skirt" ? "skirt" : garmentType === "pants" ? "pants" : "top"
+    return { torsoH, rHip, rWaist, rChest, shoulderHalf, rShoulder, shoulderH, neckBaseR, headR, neckLen, armLen, legLen, ease, kind }
+  }, [m, garmentType])
+
+  const { torsoH, rHip, rWaist, rChest, rShoulder, shoulderH, neckBaseR, headR, neckLen, armLen, legLen, ease, kind } = dims
+
+  // ── Géométrie du corps (avec épaules) ──
+  const bodyGeo = useMemo(
+    () =>
+      latheGeo([
+        [0, -0.02],
+        [rHip * 0.72, -0.02],
+        [rHip, torsoH * 0.07],
+        [rWaist * 1.05, torsoH * 0.42],
+        [rChest, torsoH * 0.74],
+        [rShoulder, shoulderH],
+        [neckBaseR, torsoH],
+      ]),
+    [rHip, rWaist, rChest, rShoulder, shoulderH, neckBaseR, torsoH],
+  )
+
+  // ── Géométrie du vêtement principal ──
+  const garmentGeo = useMemo(() => {
+    const rCol = Math.max(rChest, rHip) + ease
+    if (kind === "top") {
+      const hemY = garmentType === "dress" ? -0.5 : garmentType === "shirt" ? -0.16 : -0.04
+      const neckOpen = Math.max(neckBaseR * 1.5, rChest * 0.72)
+      return latheGeo([
+        [rCol * 1.08, hemY],
+        [rCol, torsoH * 0.07],
+        [rCol * 0.99, torsoH * 0.5],
+        [rChest + ease, torsoH * 0.74],
+        [rShoulder * 0.97, shoulderH],
+        [neckOpen, torsoH * 0.99],
+      ])
+    }
+    if (kind === "skirt") {
+      return latheGeo([
+        [rHip + 0.06, -0.42],
+        [rHip + 0.03, torsoH * 0.06],
+        [rWaist + 0.02, torsoH * 0.42],
+      ])
+    }
+    // pants : section hanches (les jambes sont des tubes séparés)
+    return latheGeo([
+      [rHip + 0.02, -0.05],
+      [rHip + 0.02, torsoH * 0.06],
+      [rWaist + 0.02, torsoH * 0.14],
+    ])
+  }, [kind, garmentType, rChest, rHip, rWaist, rShoulder, shoulderH, neckBaseR, torsoH, ease])
 
   useEffect(
     () => () => {
       bodyGeo.dispose()
-      garment.main?.dispose()
-      garment.tubes.forEach((t) => t.geo.dispose())
+      garmentGeo.dispose()
     },
-    [bodyGeo, garment],
+    [bodyGeo, garmentGeo],
   )
 
   const fab = FABRICS[fabric]
-  const skinMat = (
-    <meshStandardMaterial color={SKIN} roughness={0.7} metalness={0.05} />
+  const fabricMat = (
+    <meshStandardMaterial color={fab.color} roughness={fab.roughness} metalness={fab.metalness} side={THREE.DoubleSide} />
   )
+  const skinMat = <meshStandardMaterial color={SKIN} roughness={0.72} metalness={0.04} />
 
-  // Centre la figure autour de l'origine.
-  const groupY = (legLen - (torsoH + neckLen + headR)) / 2
+  // ── Mise à l'échelle + centrage pour tenir dans le cadre ──
+  const totalH = legLen + torsoH + neckLen + 2 * headR
+  const S = 1.18 / totalH
+  const centerY = (torsoH + neckLen + 2 * headR + -legLen) / 2
+
+  const armAngle = 0.3
+  const armRootX = rShoulder * 0.96
+  const sleeveLen = garmentType === "shirt" ? armLen * 0.9 : armLen * 0.4
+  const pantLegLen = legLen * 0.98
 
   return (
-    <group position={[0, groupY, 0]}>
+    <group scale={[S, S, S * DEPTH]} position={[0, -centerY * S, 0]}>
       {/* ── Corps ── */}
       <mesh geometry={bodyGeo} castShadow receiveShadow>
         {skinMat}
       </mesh>
       {/* Cou + tête */}
       <mesh position={[0, torsoH + neckLen * 0.5, 0]} castShadow>
-        <cylinderGeometry args={[headR * 0.42, headR * 0.5, neckLen, 16]} />
+        <cylinderGeometry args={[neckBaseR * 0.8, neckBaseR, neckLen, 16]} />
         {skinMat}
       </mesh>
-      <mesh position={[0, torsoH + neckLen + headR, 0]} castShadow>
-        <sphereGeometry args={[headR, 32, 32]} />
+      <mesh position={[0, torsoH + neckLen + headR * 0.95, 0]} castShadow>
+        <sphereGeometry args={[headR, 28, 28]} />
         {skinMat}
       </mesh>
-      {/* Bras (A-pose) */}
+
+      {/* ── Bras (rattachés à l'épaule, légèrement écartés) ── */}
       {([1, -1] as const).map((side) => (
-        <group key={`arm-${side}`} position={[side * shoulderHalf, torsoH, 0]} rotation={[0, 0, side * armAngle]}>
+        <group key={`arm-${side}`} position={[side * armRootX, shoulderH, 0]} rotation={[0, 0, side * armAngle]}>
           <mesh position={[0, -armLen / 2, 0]} castShadow>
-            <cylinderGeometry args={[0.04, 0.05, armLen, 16]} />
+            <cylinderGeometry args={[0.038, 0.05, armLen, 14]} />
             {skinMat}
           </mesh>
           <mesh position={[0, -armLen, 0]} castShadow>
             <sphereGeometry args={[0.04, 12, 12]} />
             {skinMat}
           </mesh>
+          {/* Manche (vêtement) sur le haut du bras */}
+          {kind === "top" && (
+            <mesh position={[0, -sleeveLen / 2, 0]} castShadow>
+              <cylinderGeometry args={[0.052 + ease * 0.5, 0.06 + ease, sleeveLen, 16, 1, true]} />
+              {fabricMat}
+            </mesh>
+          )}
         </group>
       ))}
-      {/* Jambes (sauf si pantalon — couvertes par le vêtement, mais on les garde fines) */}
+
+      {/* ── Jambes ── */}
       {([1, -1] as const).map((side) => (
-        <mesh key={`leg-${side}`} position={[side * 0.075, -legLen / 2, 0]} castShadow>
-          <cylinderGeometry args={[0.05, 0.06, legLen, 16]} />
-          {skinMat}
-        </mesh>
+        <group key={`leg-${side}`}>
+          <mesh position={[side * rHip * 0.42, -legLen / 2, 0]} castShadow>
+            <cylinderGeometry args={[0.05, 0.062, legLen, 14]} />
+            {skinMat}
+          </mesh>
+          {/* Jambe de pantalon (vêtement) */}
+          {kind === "pants" && (
+            <mesh position={[side * rHip * 0.42, -0.05 - pantLegLen / 2, 0]} castShadow>
+              <cylinderGeometry args={[0.07, 0.095, pantLegLen, 18, 1, true]} />
+              {fabricMat}
+            </mesh>
+          )}
+        </group>
       ))}
 
-      {/* ── Vêtement (surfaces lisses) ── */}
-      {garment.main && (
-        <mesh geometry={garment.main} castShadow>
-          <meshStandardMaterial
-            color={fab.color}
-            roughness={fab.roughness}
-            metalness={fab.metalness}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      )}
-      {garment.tubes.map((t, i) => (
-        <mesh key={`tube-${i}`} geometry={t.geo} position={t.pos} rotation={[0, 0, t.rotZ]} castShadow>
-          <meshStandardMaterial
-            color={fab.color}
-            roughness={fab.roughness}
-            metalness={fab.metalness}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
+      {/* ── Vêtement principal (surface lisse) ── */}
+      <mesh geometry={garmentGeo} castShadow>
+        {fabricMat}
+      </mesh>
 
       {/* ── Fourrure sur le vêtement principal ── */}
-      {furEnabled && garment.main && (
-        <FurShells geometry={garment.main} color={fab.color} preset={furPreset} />
-      )}
+      {furEnabled && <FurShells geometry={garmentGeo} color={fab.color} preset={furPreset} />}
     </group>
   )
 }
