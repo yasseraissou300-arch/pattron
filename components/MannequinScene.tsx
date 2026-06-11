@@ -19,7 +19,8 @@ import {
 import { Cloth } from "@/lib/3d/cloth"
 import { buildClothForPiece } from "@/lib/3d/cloth-pieces"
 import { FABRICS, type FabricKey } from "@/lib/3d/fabrics"
-import { DressedMannequin, FurShells } from "./DressedMannequin"
+import { FurShells } from "./DressedMannequin"
+import { RealisticAvatar } from "./RealisticAvatar"
 
 const CM_TO_M = 0.01
 const SKIN_COLOR = "#e8c5a0"
@@ -289,7 +290,7 @@ export function MannequinScene({
             furPreset={furPreset}
           />
         ) : (
-          <DressedMannequin
+          <RealisticAvatar
             measurements={measurements}
             fabric={fabric}
             garmentType={garmentType}
