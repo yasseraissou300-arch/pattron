@@ -1,25 +1,30 @@
 "use client"
 
-// Charge un VRAI modèle humain 3D (glTF/glb) pour remplacer le mannequin
-// procédural et se rapprocher du "look pro" (type Optitex/CLO).
+// Avatar 3D réaliste : un vrai modèle humain glTF (par défaut /avatar.glb,
+// hébergé dans l'app — aucun service externe requis), habillé d'un vêtement en
+// surfaces lisses calé sur ses proportions.
 //
-// Robustesse : l'URL du modèle vient de NEXT_PUBLIC_AVATAR_URL. Si elle est
-// absente OU si le chargement échoue, on REPLIE automatiquement sur le mannequin
-// propre procédural (DressedMannequin) → la prod ne casse jamais, même si le
-// modèle est indisponible. Le modèle est auto-cadré (bbox → hauteur cible).
+// Robustesse : si le modèle est introuvable ou échoue à charger (404, format),
+// repli automatique sur le mannequin procédural (DressedMannequin) → la prod ne
+// casse jamais. Le modèle est auto-cadré (bbox → hauteur cible, centré).
+//
+// Note : pas de clone du glTF — c'est un mesh skinné (squelette), le clonage
+// naïf casse les liaisons d'os. On transforme un <group> parent à la place.
 
-import { Suspense, useMemo, Component, type ReactNode } from "react"
+import { Suspense, useMemo, useEffect, Component, type ReactNode } from "react"
 import { useGLTF } from "@react-three/drei"
 import * as THREE from "three"
 import type { SizeMeasurements } from "@/lib/types/pattern"
 import type { GarmentType } from "@/lib/patterns/index"
-import type { FabricKey } from "@/lib/3d/fabrics"
-import { DressedMannequin } from "./DressedMannequin"
+import { FABRICS, type FabricKey } from "@/lib/3d/fabrics"
+import { DressedMannequin, FurShells } from "./DressedMannequin"
 
-const AVATAR_URL = (process.env.NEXT_PUBLIC_AVATAR_URL ?? "").trim()
-const TARGET_HEIGHT = 1.4 // mètres dans la scène
+const AVATAR_URL = (process.env.NEXT_PUBLIC_AVATAR_URL ?? "/avatar.glb").trim()
+const TARGET_HEIGHT = 1.4 // hauteur de l'avatar dans la scène (m)
+const CM_TO_M = 0.01
+const radiusOf = (c: number) => (c / (2 * Math.PI)) * CM_TO_M
 
-// Petit error boundary : si le glTF échoue (404/CORS/format), on rend le repli.
+// Petit error boundary : si le glTF échoue (404/format), on rend le repli.
 class GltfBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { err: boolean }> {
   state = { err: false }
   static getDerivedStateFromError() {
@@ -33,30 +38,103 @@ class GltfBoundary extends Component<{ fallback: ReactNode; children: ReactNode 
   }
 }
 
+function latheGeo(points: Array<[number, number]>, seg = 56): THREE.LatheGeometry {
+  return new THREE.LatheGeometry(
+    points.map(([r, y]) => new THREE.Vector2(Math.max(r, 0.002), y)),
+    seg,
+  )
+}
+
+// Vêtement en surfaces lisses ancré sur les proportions humaines standard de
+// l'avatar (hauteur TARGET_HEIGHT, épaules ~81 %, hanches ~52 % de la hauteur).
+// Les rayons viennent des mensurations utilisateur, remis à l'échelle de l'avatar.
+function useAvatarGarment(m: SizeMeasurements, garmentType: GarmentType) {
+  return useMemo(() => {
+    const H = TARGET_HEIGHT
+    const base = -H / 2 // pieds (modèle centré à l'origine)
+    const shoulderY = base + H * 0.81
+    const chestY = base + H * 0.72
+    const waistY = base + H * 0.62
+    const hipY = base + H * 0.52
+    const kneeY = base + H * 0.28
+
+    // Mensurations supposées prises sur ~1,65 m → remise à l'échelle avatar.
+    const k = H / 1.65
+    const ease = 0.02
+    const rChest = radiusOf(m.poitrine) * k + ease
+    const rWaist = radiusOf(m.taille) * k + ease
+    const rHip = radiusOf(m.hanches) * k + ease
+    const rCol = Math.max(rChest, rHip)
+    const neckOpen = rChest * 0.55
+
+    let geo: THREE.LatheGeometry
+    if (garmentType === "skirt") {
+      geo = latheGeo([
+        [rHip + 0.05, kneeY],
+        [rHip, hipY],
+        [rWaist, waistY],
+      ])
+    } else if (garmentType === "pants") {
+      geo = latheGeo([
+        [rHip + 0.015, hipY - 0.06],
+        [rHip, hipY],
+        [rWaist, waistY],
+      ])
+    } else {
+      const hemY =
+        garmentType === "dress" ? kneeY : garmentType === "shirt" ? hipY - 0.05 : hipY + 0.02
+      geo = latheGeo([
+        [rCol * 1.06, hemY],
+        [rCol, hipY],
+        [rCol * 0.99, waistY],
+        [rChest, chestY],
+        [rChest * 0.92, shoulderY - 0.015],
+        [neckOpen, shoulderY + 0.012],
+      ])
+    }
+
+    // Jambes de pantalon (tubes), ancrées sous les hanches.
+    const pantLegs =
+      garmentType === "pants"
+        ? ([1, -1] as const).map((side) => ({
+            x: side * rHip * 0.45,
+            top: hipY - 0.04,
+            len: hipY - 0.04 - (base + 0.05),
+          }))
+        : []
+
+    return { geo, pantLegs }
+  }, [m, garmentType])
+}
+
 function AvatarModel({ url }: { url: string }) {
-  const gltf = useGLTF(url, true)
-  const object = useMemo(() => {
-    const o = gltf.scene.clone(true)
-    const box = new THREE.Box3().setFromObject(o)
+  const gltf = useGLTF(url)
+  const transform = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(gltf.scene)
     const size = new THREE.Vector3()
     const center = new THREE.Vector3()
     box.getSize(size)
     box.getCenter(center)
     const s = TARGET_HEIGHT / (size.y || 1)
-    o.scale.setScalar(s)
-    // Centre le modèle à l'origine (la caméra de la scène vise [0,0,0]).
-    o.position.set(-center.x * s, -center.y * s, -center.z * s)
-    o.traverse((child) => {
+    return { s, center }
+  }, [gltf])
+
+  useEffect(() => {
+    gltf.scene.traverse((child) => {
       const mesh = child as THREE.Mesh
       if (mesh.isMesh) {
         mesh.castShadow = true
         mesh.receiveShadow = true
       }
     })
-    return o
   }, [gltf])
 
-  return <primitive object={object} />
+  const { s, center } = transform
+  return (
+    <group scale={[s, s, s]} position={[-center.x * s, -center.y * s, -center.z * s]}>
+      <primitive object={gltf.scene} />
+    </group>
+  )
 }
 
 interface RealisticAvatarProps {
@@ -67,8 +145,46 @@ interface RealisticAvatarProps {
   furPreset?: string
 }
 
+function DressedAvatar({
+  measurements,
+  fabric,
+  garmentType,
+  furEnabled = false,
+  furPreset = "moyenne",
+}: RealisticAvatarProps) {
+  const { geo, pantLegs } = useAvatarGarment(measurements, garmentType)
+  useEffect(() => () => geo.dispose(), [geo])
+  const fab = FABRICS[fabric]
+
+  return (
+    <group>
+      <AvatarModel url={AVATAR_URL} />
+      <mesh geometry={geo} castShadow>
+        <meshStandardMaterial
+          color={fab.color}
+          roughness={fab.roughness}
+          metalness={fab.metalness}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {pantLegs.map((leg, i) => (
+        <mesh key={i} position={[leg.x, leg.top - leg.len / 2, 0]} castShadow>
+          <cylinderGeometry args={[0.075, 0.095, leg.len, 18, 1, true]} />
+          <meshStandardMaterial
+            color={fab.color}
+            roughness={fab.roughness}
+            metalness={fab.metalness}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      ))}
+      {furEnabled && <FurShells geometry={geo} color={fab.color} preset={furPreset} />}
+    </group>
+  )
+}
+
 export function RealisticAvatar(props: RealisticAvatarProps) {
-  // Repli : mannequin propre procédural (+ vêtement) si pas de modèle.
+  // Repli : mannequin propre procédural (+ vêtement) si le modèle échoue.
   const fallback = (
     <DressedMannequin
       measurements={props.measurements}
@@ -79,22 +195,13 @@ export function RealisticAvatar(props: RealisticAvatarProps) {
     />
   )
 
-  if (!AVATAR_URL) return fallback
-
   return (
     <GltfBoundary fallback={fallback}>
       <Suspense fallback={fallback}>
-        <AvatarModel url={AVATAR_URL} />
+        <DressedAvatar {...props} />
       </Suspense>
     </GltfBoundary>
   )
 }
 
-// Préchargement (ignoré si l'URL est vide).
-if (AVATAR_URL) {
-  try {
-    useGLTF.preload(AVATAR_URL)
-  } catch {
-    /* no-op */
-  }
-}
+useGLTF.preload(AVATAR_URL)
