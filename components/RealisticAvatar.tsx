@@ -45,6 +45,11 @@ function latheGeo(points: Array<[number, number]>, seg = 56): THREE.LatheGeometr
   )
 }
 
+// Profondeur du vêtement : le corps humain est plus large que profond. Sans cet
+// écrasement de l'axe Z, le lathe circulaire donne un "tonneau" (constaté à
+// l'écran). 0.62 ≈ ratio profondeur/largeur d'un buste.
+const GARMENT_DEPTH = 0.62
+
 // Vêtement en surfaces lisses ancré sur les proportions humaines standard de
 // l'avatar (hauteur TARGET_HEIGHT, épaules ~81 %, hanches ~52 % de la hauteur).
 // Les rayons viennent des mensurations utilisateur, remis à l'échelle de l'avatar.
@@ -64,34 +69,56 @@ function useAvatarGarment(m: SizeMeasurements, garmentType: GarmentType) {
     const rChest = radiusOf(m.poitrine) * k + ease
     const rWaist = radiusOf(m.taille) * k + ease
     const rHip = radiusOf(m.hanches) * k + ease
-    const rCol = Math.max(rChest, rHip)
-    const neckOpen = rChest * 0.55
+    const neckOpen = rChest * 0.45
 
     let geo: THREE.LatheGeometry
     if (garmentType === "skirt") {
       geo = latheGeo([
-        [rHip + 0.05, kneeY],
-        [rHip, hipY],
-        [rWaist, waistY],
+        [rHip * 1.18, kneeY],
+        [rHip * 1.02, hipY],
+        [rWaist * 1.05, waistY],
       ])
     } else if (garmentType === "pants") {
       geo = latheGeo([
-        [rHip + 0.015, hipY - 0.06],
-        [rHip, hipY],
-        [rWaist, waistY],
+        [rHip * 1.03, hipY - 0.06],
+        [rHip * 1.02, hipY],
+        [rWaist * 1.05, waistY],
+      ])
+    } else if (garmentType === "dress") {
+      // Robe A-line : évasée en bas, cintrée à la taille, épaules inclinées.
+      geo = latheGeo([
+        [rHip * 1.2, kneeY],
+        [rHip * 1.04, hipY],
+        [rWaist * 1.08, waistY],
+        [rChest * 1.03, chestY],
+        [rChest * 0.93, shoulderY - 0.035],
+        [neckOpen, shoulderY + 0.015],
       ])
     } else {
-      const hemY =
-        garmentType === "dress" ? kneeY : garmentType === "shirt" ? hipY - 0.05 : hipY + 0.02
+      // T-shirt / chemise : tombé droit, épaules inclinées vers l'encolure.
+      const hemY = garmentType === "shirt" ? hipY - 0.05 : hipY + 0.02
       geo = latheGeo([
-        [rCol * 1.06, hemY],
-        [rCol, hipY],
-        [rCol * 0.99, waistY],
-        [rChest, chestY],
-        [rChest * 0.92, shoulderY - 0.015],
-        [neckOpen, shoulderY + 0.012],
+        [rHip * 1.06, hemY],
+        [rChest * 1.05, waistY],
+        [rChest * 1.04, chestY],
+        [rChest * 0.93, shoulderY - 0.035],
+        [neckOpen, shoulderY + 0.015],
       ])
     }
+
+    // Manches : l'avatar est en T-pose (bras à l'horizontale) → tubes le long
+    // de l'axe X, partant de l'épaule. Pas de manches pour jupe/pantalon.
+    const sleeveLen =
+      garmentType === "shirt" ? 0.34 : garmentType === "pants" || garmentType === "skirt" ? 0 : 0.12
+    const sleeves =
+      sleeveLen > 0
+        ? ([1, -1] as const).map((side) => ({
+            x: side * (rChest * 0.82 + sleeveLen / 2),
+            y: shoulderY - 0.018,
+            len: sleeveLen,
+            side,
+          }))
+        : []
 
     // Jambes de pantalon (tubes), ancrées sous les hanches.
     const pantLegs =
@@ -103,7 +130,7 @@ function useAvatarGarment(m: SizeMeasurements, garmentType: GarmentType) {
           }))
         : []
 
-    return { geo, pantLegs }
+    return { geo, pantLegs, sleeves }
   }, [m, garmentType])
 }
 
@@ -152,30 +179,41 @@ function DressedAvatar({
   furEnabled = false,
   furPreset = "moyenne",
 }: RealisticAvatarProps) {
-  const { geo, pantLegs } = useAvatarGarment(measurements, garmentType)
+  const { geo, pantLegs, sleeves } = useAvatarGarment(measurements, garmentType)
   useEffect(() => () => geo.dispose(), [geo])
   const fab = FABRICS[fabric]
+  const fabricMat = (
+    <meshStandardMaterial
+      color={fab.color}
+      roughness={fab.roughness}
+      metalness={fab.metalness}
+      side={THREE.DoubleSide}
+    />
+  )
 
   return (
     <group>
       <AvatarModel url={AVATAR_URL} />
-      <mesh geometry={geo} castShadow>
-        <meshStandardMaterial
-          color={fab.color}
-          roughness={fab.roughness}
-          metalness={fab.metalness}
-          side={THREE.DoubleSide}
-        />
+      {/* Vêtement principal : section elliptique (écrasement Z) → pas de "tonneau". */}
+      <mesh geometry={geo} scale={[1, 1, GARMENT_DEPTH]} castShadow>
+        {fabricMat}
       </mesh>
+      {/* Manches horizontales (avatar en T-pose) */}
+      {sleeves.map((s) => (
+        <mesh
+          key={`sleeve-${s.side}`}
+          position={[s.x, s.y, 0]}
+          rotation={[0, 0, Math.PI / 2]}
+          castShadow
+        >
+          <cylinderGeometry args={[0.045, 0.055, s.len, 16, 1, true]} />
+          {fabricMat}
+        </mesh>
+      ))}
       {pantLegs.map((leg, i) => (
         <mesh key={i} position={[leg.x, leg.top - leg.len / 2, 0]} castShadow>
           <cylinderGeometry args={[0.075, 0.095, leg.len, 18, 1, true]} />
-          <meshStandardMaterial
-            color={fab.color}
-            roughness={fab.roughness}
-            metalness={fab.metalness}
-            side={THREE.DoubleSide}
-          />
+          {fabricMat}
         </mesh>
       ))}
       {furEnabled && <FurShells geometry={geo} color={fab.color} preset={furPreset} />}
