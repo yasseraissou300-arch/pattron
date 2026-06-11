@@ -4,8 +4,10 @@
 
 import { JOINT_IDS, JOINT_RANGES, clampPose, type Pose } from "@/lib/3d/poses"
 
-const GEMINI_MODEL = "gemini-2.5-flash"
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
+// Chaîne de repli : quotas gratuits séparés par modèle (cf. lib/ai.ts).
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+const endpointFor = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
 
 // Description des bornes injectée dans le prompt (source unique : JOINT_RANGES).
 const RANGES_DOC = JOINT_IDS.map(
@@ -49,7 +51,7 @@ export async function generatePoseFromText(prompt: string): Promise<Pose> {
     throw new Error("GEMINI_API_KEY n'est pas configurée")
   }
 
-  const body = {
+  const makeBody = (model: string) => ({
     system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
     contents: [
       {
@@ -61,37 +63,47 @@ export async function generatePoseFromText(prompt: string): Promise<Pose> {
       response_mime_type: "application/json",
       response_schema: RESPONSE_SCHEMA,
       temperature: 0.4,
-      thinkingConfig: { thinkingBudget: 0 },
+      // Option "thinking" propre aux modèles 2.5 (cf. lib/ai.ts).
+      ...(model.startsWith("gemini-2.5")
+        ? { thinkingConfig: { thinkingBudget: 0 } }
+        : {}),
       maxOutputTokens: 1024,
     },
-  }
+  })
 
-  const RETRY_DELAYS_MS = [800, 2400, 6000]
+  const RETRY_DELAYS_MS = [800, 2400]
   let lastErr: { status: number; body: string } | null = null
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    const res = await fetch(GEMINI_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify(body),
-    })
+  for (const model of GEMINI_MODELS) {
+    const body = makeBody(model)
 
-    if (res.ok) {
-      return await parsePoseResponse(res)
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      const res = await fetch(endpointFor(model), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(body),
+      })
+
+      if (res.ok) {
+        return await parsePoseResponse(res)
+      }
+
+      const errTxt = await res.text().catch(() => "")
+      lastErr = { status: res.status, body: errTxt.slice(0, 300) }
+
+      const retriable =
+        res.status === 503 || res.status === 502 || res.status === 500 || res.status === 429
+      if (!retriable) {
+        throw new Error(`Gemini API ${lastErr.status}: ${lastErr.body}`)
+      }
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
+      }
     }
-
-    const errTxt = await res.text().catch(() => "")
-    lastErr = { status: res.status, body: errTxt.slice(0, 300) }
-
-    const retriable =
-      res.status === 503 || res.status === 502 || res.status === 500 || res.status === 429
-    const hasMoreAttempts = attempt < RETRY_DELAYS_MS.length
-    if (!retriable || !hasMoreAttempts) break
-
-    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
+    console.warn(`[pose-ai] ${model} saturé (${lastErr?.status}), repli sur le modèle suivant`)
   }
 
   throw new Error(`Gemini API ${lastErr?.status}: ${lastErr?.body}`)

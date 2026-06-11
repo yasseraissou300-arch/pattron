@@ -77,8 +77,12 @@ const RESPONSE_SCHEMA = {
   ],
 }
 
-const GEMINI_MODEL = "gemini-2.5-flash"
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
+// Chaîne de repli : les quotas gratuits sont PAR modèle chez Google. Si
+// 2.5-flash est saturé (429), on bascule sur 2.5-flash-lite puis 2.0-flash —
+// quotas séparés, même API, même schéma de réponse.
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+const endpointFor = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
 
 export async function analyzeGarmentImage(
   imageBase64: string,
@@ -89,7 +93,7 @@ export async function analyzeGarmentImage(
     throw new Error("GEMINI_API_KEY n'est pas configurée")
   }
 
-  const body = {
+  const makeBody = (model: string) => ({
     system_instruction: {
       parts: [{ text: SYSTEM_PROMPT }],
     },
@@ -113,42 +117,51 @@ export async function analyzeGarmentImage(
       response_mime_type: "application/json",
       response_schema: RESPONSE_SCHEMA,
       temperature: 0.2,
-      // gemini-2.5-flash est un modèle "thinking" : sans plafond explicite,
-      // le raisonnement consomme tout le budget et la réponse JSON arrive
-      // tronquée. On désactive le thinking pour cette tâche simple de
-      // classification, et on garde une marge confortable de tokens.
-      thinkingConfig: { thinkingBudget: 0 },
+      // Les modèles 2.5 sont "thinking" : sans plafond explicite, le
+      // raisonnement consomme tout le budget et la réponse JSON arrive
+      // tronquée. On le désactive (option inconnue de 2.0 → ne pas l'envoyer).
+      ...(model.startsWith("gemini-2.5")
+        ? { thinkingConfig: { thinkingBudget: 0 } }
+        : {}),
       maxOutputTokens: 1024,
     },
-  }
+  })
 
-  // Retry sur 5xx / 429 (modèle saturé chez Google) avec backoff exponentiel.
-  // Les 4xx restants sont des erreurs déterministes (auth, payload) → pas de retry.
-  const RETRY_DELAYS_MS = [800, 2400, 6000]
+  // Par modèle : retry court sur 5xx/429, puis passage au modèle suivant.
+  // Les autres 4xx (auth, payload) sont déterministes → échec immédiat.
+  const RETRY_DELAYS_MS = [800, 2400]
   let lastErr: { status: number; body: string } | null = null
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    const res = await fetch(GEMINI_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify(body),
-    })
+  for (const model of GEMINI_MODELS) {
+    const body = makeBody(model)
 
-    if (res.ok) {
-      return await parseGeminiResponse(res)
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      const res = await fetch(endpointFor(model), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(body),
+      })
+
+      if (res.ok) {
+        return await parseGeminiResponse(res)
+      }
+
+      const errTxt = await res.text().catch(() => "")
+      lastErr = { status: res.status, body: errTxt.slice(0, 300) }
+
+      const retriable = res.status === 503 || res.status === 502 || res.status === 500 || res.status === 429
+      if (!retriable) {
+        throw new Error(`Gemini API ${lastErr.status}: ${lastErr.body}`)
+      }
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
+      }
     }
-
-    const errTxt = await res.text().catch(() => "")
-    lastErr = { status: res.status, body: errTxt.slice(0, 300) }
-
-    const retriable = res.status === 503 || res.status === 502 || res.status === 500 || res.status === 429
-    const hasMoreAttempts = attempt < RETRY_DELAYS_MS.length
-    if (!retriable || !hasMoreAttempts) break
-
-    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
+    // Modèle saturé après retries → on tente le modèle suivant.
+    console.warn(`[ai] ${model} saturé (${lastErr?.status}), repli sur le modèle suivant`)
   }
 
   throw new Error(`Gemini API ${lastErr?.status}: ${lastErr?.body}`)
