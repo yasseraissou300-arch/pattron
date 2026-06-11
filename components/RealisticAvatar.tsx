@@ -86,24 +86,26 @@ function useAvatarGarment(m: SizeMeasurements, garmentType: GarmentType) {
         [rWaist * 1.1, waistY],
       ])
     } else if (garmentType === "dress") {
-      // Robe A-line : évasée en bas, cintrée à la taille, épaules inclinées.
+      // Robe A-line : évasée en bas, cintrée à la taille. Le haut couvre toute
+      // l'épaule puis remonte en col ras-du-cou AU-DESSUS des trapèzes (sinon le
+      // bord croise les muscles → vaguelettes et épaules nues, constaté à l'écran).
       geo = latheGeo([
         [rHip * 1.24, kneeY],
         [rHip * 1.1, hipY],
         [rWaist * 1.14, waistY],
         [rChest * 1.09, chestY],
-        [rChest * 0.97, shoulderY - 0.035],
-        [neckOpen, shoulderY + 0.015],
+        [rChest * 1.0, shoulderY - 0.005],
+        [rChest * 0.55, shoulderY + 0.04],
       ])
     } else {
-      // T-shirt / chemise : tombé droit, épaules inclinées vers l'encolure.
+      // T-shirt / chemise : tombé droit, même traitement épaules/col que la robe.
       const hemY = garmentType === "shirt" ? hipY - 0.05 : hipY + 0.02
       geo = latheGeo([
         [rHip * 1.12, hemY],
         [rChest * 1.11, waistY],
         [rChest * 1.1, chestY],
-        [rChest * 0.97, shoulderY - 0.035],
-        [neckOpen, shoulderY + 0.015],
+        [rChest * 1.0, shoulderY - 0.005],
+        [rChest * 0.55, shoulderY + 0.04],
       ])
     }
 
@@ -111,11 +113,13 @@ function useAvatarGarment(m: SizeMeasurements, garmentType: GarmentType) {
     // de l'axe X, partant de l'épaule. Pas de manches pour jupe/pantalon.
     const sleeveLen =
       garmentType === "shirt" ? 0.34 : garmentType === "pants" || garmentType === "skirt" ? 0 : 0.12
+    // Ancrage rentré (rChest*0.7) : la manche chevauche le corps du vêtement,
+    // plus d'épaule nue entre le col et la manche.
     const sleeves =
       sleeveLen > 0
         ? ([1, -1] as const).map((side) => ({
-            x: side * (rChest * 0.82 + sleeveLen / 2),
-            y: shoulderY - 0.018,
+            x: side * (rChest * 0.7 + sleeveLen / 2),
+            y: shoulderY - 0.008,
             len: sleeveLen,
             side,
           }))
